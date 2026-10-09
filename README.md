@@ -2,39 +2,41 @@ mind-meld
 =========
 
 This is a Clojure and ClojureScript library for keeping an app's data the
-same on all of a user's devices without a server, e.g. the notes of a
-notes app, the queue of a podcast app, or the settings of any app. Each
-device keeps the data as a plain map and changes it offline, and any two
-of those maps merge without conflict, in any order. It's a CRDT, a
-conflict-free replicated data type.
+same on all of a user's devices without a server to merge it, e.g. the
+notes of a notes app, the queue of a podcast app, or the settings of any
+app. Each device keeps the data as a plain map and can change it offline,
+and any two of those maps merge without conflict, in any order. It's a
+CRDT, a conflict-free replicated data type.
 
 - **Plain data.** The state is a map that prints as EDN, so you can keep
   it anywhere a file can go, e.g. a folder that Dropbox syncs, a WebDAV
   server or IndexedDB.
 - **The later change wins.** Each entry is stamped with the time and the
-  device of its last change. A removal leaves a tombstone, so an older
-  copy of the entry can't bring it back.
-- **Ordered lists.** A queue keeps its order on every device, the items
-  that two devices add at the same time don't mix, and a move never brings
-  back an item that another device removed.
-- **Counts.** A count that only grows, e.g. the seconds listened on one
-  device, keeps the higher of two counts.
-- **Tidying up.** A registry of the devices notes what each has seen, so
-  that tombstones are dropped once every device has them.
+  device of its last change. A removed entry stays as a tombstone, marked
+  `:removed?`, so that an older copy of it can't bring it back.
+- **Ordered lists.** A queue has the same order on every device, the
+  items that a device appends together don't mix with another device's,
+  and a move never brings back an item that another device removed.
+- **Counts.** Of two copies of a count that only grows, e.g. the seconds
+  listened on one device, the merge keeps the higher.
+- **Tidying up.** A registry of the devices records what each has
+  merged, so that a tombstone can be dropped once every device has it.
 
 The same code runs on the JVM, in Node and in the browser, with the same
 results on each.
 
 > This library was spun out of [podcast-clj](https://github.com/simongray/podcast-clj),
-> a library for making podcast software, where it syncs a listener's
-> subscriptions, queue and play progress between their devices. Like
-> podcast-clj, it was developed with assistance from frontier LLMs.
+> a library for making podcast software, which uses it to sync a
+> listener's subscriptions, queue and play progress between their
+> devices. Like podcast-clj, it was developed with assistance from
+> frontier LLMs.
 
 Getting started
 ---------------
 
-Add it to the `:deps` in your `deps.edn` as a Git dependency, with the SHA
-of the latest commit on `master` (requires Clojure 1.11+ & Java 11+):
+It requires Clojure 1.11+ and Java 11+. Add it to the `:deps` in your
+`deps.edn` as a Git dependency, with the SHA of the latest commit on
+`master`:
 
 ```clojure
 io.github.simongray/mind-meld {:git/sha "…"}
@@ -44,8 +46,8 @@ For ClojureScript, also set `:deps true` in your `shadow-cljs.edn`, since
 shadow-cljs only reads Git dependencies from `deps.edn`.
 
 A state is a map with the id of its device, and a schema names its
-collections. Each device writes its changes with `crdt/write`, at the time
-it made them:
+collections. Each device writes its changes with `crdt/write` and the
+time each was made:
 
 ```clojure
 (require '[dk.simongray.mind-meld :as crdt])
@@ -67,8 +69,8 @@ it made them:
 ```
 
 The `:depth` of the notes is 1, since one key, the note's id, leads to
-each of them. With `:compact? true`, the tombstones of removed notes are
-dropped once every device has seen them, as described
+each of them. With `:compact? true`, the tombstones of removed notes can
+be dropped once every device has seen them, as described
 [below](#tombstones-and-devices).
 
 To sync, a device merges the states of the others into its own:
@@ -86,7 +88,7 @@ To sync, a device merges the states of the others into its own:
 ```
 
 The merge gives the same result in any order and any number of times, so
-the devices can sync through anything that stores a document. Where two
+the devices can sync through anything that stores a file. Where two
 devices changed the same entry, the later change wins. A removal is a
 change too, which leaves a tombstone, e.g. when the laptop has synced and
 removes the milk note:
@@ -99,20 +101,22 @@ removes the milk note:
 ```
 
 If the phone, still offline, edits the note at 10:30, the note stays
-removed on both devices once they sync. Ask `crdt/live?` whether an entry
-is there and isn't a tombstone.
+removed on both devices once they sync, since the removal at 11:00 is
+later. Use `crdt/live?` to tell whether an entry is there and isn't a
+tombstone.
 
-A few more functions cover the rest of a sync:
+Other functions cover imports and the rest of a sync:
 
-- `crdt/at-once` gives a series of writes one stamp, e.g. those of an
-  import. Without it, writes made at one time are stamped a millisecond
-  apart, since a write is always stamped later than the state's clock.
-- `crdt/as-device` writes what another device or a service did, at a time
-  of its own.
-- `crdt/changes-since` gives what changed since an earlier state, for a
-  service that takes changes rather than whole states.
-- `crdt/problem` describes what in a state would break the merge, so you
-  can check a state from another device before you merge it.
+- With `crdt/at-once`, a series of writes gets one stamp, e.g. those of
+  an import. Without it, writes made at one time are stamped a
+  millisecond apart, since a write is always stamped later than the
+  state's clock.
+- With `crdt/as-device`, you can write what another device or a service
+  did, at the time it happened there.
+- For a service that takes changes rather than whole states,
+  `crdt/changes-since` gives what changed since an earlier state.
+- To check a state from another device before you merge it,
+  `crdt/problem` describes what in it would break the merge.
 
 Ordered lists
 -------------
@@ -178,21 +182,21 @@ Tombstones and devices
 ----------------------
 
 Tombstones pile up, so `crdt/compact` drops those of the collections with
-`:compact? true` once every device has merged them and they're 30 days
-old, by default. To know what each device has merged, the state keeps a
-registry of the devices:
+`:compact? true` once every device has merged them and they're older than
+its `:keep-for` option, 30 days by default. The state holds a registry of
+the devices, which records what each has merged:
 
 - Each device describes itself once with `crdt/identify`, e.g. with its
   name and platform.
-- After it merges the whole states of other devices, it notes what they
-  held with `crdt/acknowledge`.
+- After it merges the whole states of other devices, it records that it
+  has merged them with `crdt/acknowledge`.
 - A device that stops syncing holds compaction back. `crdt/lagging` lists
   such devices, and `crdt/retire` removes one for good.
 
 Principles
 ----------
 
-- **Standards first.** Each part follows a published CRDT, e.g. the
+- **Standards first.** Each part follows a published design, e.g. the
   last-writer-wins register and element set of Shapiro et al. The code
   cites its sources, and says where it departs from them.
 - **Merge by shape.** The merge goes key by key, down through maps to the
@@ -202,11 +206,11 @@ Principles
   the device has merged, as a hybrid logical clock does, but with no
   counter, so a stamp stays a plain instant.
 - **The same winner everywhere.** Of two entries with the same stamp, the
-  device id decides, and then the printed entry, which prints the same on
+  device id decides, and then the entry as printed, which is the same on
   every platform.
 - **Forget only what everyone has seen.** A tombstone is only dropped once
-  every device in the registry has merged it, so no device can bring back
-  what the others forgot.
+  every device in the registry has merged it, so no device in the registry
+  can bring back what the others forgot.
 - **One codebase.** The library is written in `.cljc`, with no
   dependencies but Clojure.
 
