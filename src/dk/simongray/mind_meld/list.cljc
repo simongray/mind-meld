@@ -1,12 +1,11 @@
 (ns dk.simongray.mind-meld.list
-  "Ordered collections in a state of dk.simongray.mind-meld, such as a queue,
-  which devices reorder in any order without conflict.
+  "Ordered collections in a mind-meld state, e.g. a queue, which devices
+  change in any order without conflict.
 
-  A collection is a map of id to an entry with a :rank, a string that
-  sorts as the place of the entry, as crdt.rank makes them. A move can go
-  in a second map of the same ids, whose entries hold only the new rank,
-  so that a move never brings back what another device removed. A schema
-  marks such collections :ranked?, which problem checks.
+  An ordered collection is a map of id to an entry with a :rank, a string
+  that sorts by the entry's place. A move can go in a second map of the
+  same ids, whose entries hold only the new rank, so that a move never
+  brings back what another device removed. A schema marks both :ranked?:
 
       {:queue       {:depth 1 :ranked? true}
        :queue-moves {:depth 1 :ranked? true}}
@@ -53,7 +52,7 @@
 
 (defn rank-between
   "A rank between the entries of the ids `before-id` and `after-id` of the
-  ordered `entries`, either nil at an end, and after any entries that
+  ordered `entries`, either nil for an end, and after any entries that
   share the rank of `before-id`."
   [entries before-id after-id]
   (let [a (some->> before-id (get entries) :rank)
@@ -65,9 +64,9 @@
     (rank/between a b)))
 
 (defn- last-rank
-  "The greatest rank among the live `entries`, or nil, found in one pass
-  so that appending many entries doesn't sort them each time."
+  "The greatest rank among the live `entries`, or nil."
   [entries]
+  ;; one pass, so that appending many entries doesn't sort them each time
   (reduce-kv (fn [r _ {:keys [rank removed?]}]
                (if (and (not removed?)
                         (pos? (compare rank r)))
@@ -95,14 +94,13 @@
 ;; (Kleppmann et al. 2019, section 2), but single inserts at one place on two
 ;; devices still tie.
 (defn appended
-  "The writes that put the `ids`, in order, at the end of the ordered
-  `entries` at `path` in `state`, e.g. a queue, as with-moves gives them,
-  for crdt/write-each.
+  "The writes that put the `ids` in order at the end of the ordered
+  `entries` at `path` in `state`, with their moves, as pairs of a path and
+  a function.
 
-  An id that's already there stays where it is. The ranks come from
-  rank/after, which keeps them short for many ids. They're in a block of
-  the state's device, so that ids that another device appends at the same
-  time don't mix with them."
+  An id that's already there stays where it is. The ranks are in a block
+  of the state's device, so that ids that another device appends at the
+  same time don't mix with them."
   [state path entries ids]
   (let [fresh (remove #(crdt/live? (get entries %)) (distinct ids))
         ranks (rank/after (last-rank entries) (count fresh) (:device state))]
@@ -112,8 +110,8 @@
          ranks)))
 
 (defn append
-  "The `state` with the `ids` at the end of the ordered `entries` at
-  `path`, written at `at` as appended gives them."
+  "The `state` with the `ids` written at `at` to the end of the ordered
+  `entries` at `path`, with their moves, unless they're there already."
   [state path entries ids at]
   (if-let [writes (seq (appended state path entries ids))]
     (crdt/write-each state writes at)
@@ -137,11 +135,9 @@
              (pr-str rank) ", not a rank")))))
 
 (defn problem
-  "A description of the first entry of the collections of `state` that the
-  `schema` marks :ranked?, whose :rank isn't a rank, or nil.
-
-  Such a rank, e.g. from another version of an app, would make ranked
-  throw. Check the rest of the state with crdt/problem."
+  "A description of the first entry whose :rank isn't a rank, in the
+  collections of `state` that the `schema` marks :ranked?, or nil. Such a
+  rank, e.g. from another version of an app, makes sorting throw."
   [schema state]
   (some (fn [[k {:keys [depth ranked?]}]]
           (when ranked?

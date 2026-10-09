@@ -3,20 +3,9 @@
   for another between any two.
 
   A rank is digits in base 62, from 0 to 9, A to Z and a to z. It's read
-  as a fraction with no trailing zero, and compared as a string. The
-  between function gives a rank between two, before the first or after
-  the last:
-
-      (between nil nil)   ;=> \"V\"    the first rank
-      (between \"V\" nil)   ;=> \"W\"    after it
-      (between \"V\" \"W\")   ;=> \"VV\"   between the two
-      (between nil \"V\")   ;=> \"U\"    before the first
-
-  At an end of a list, the ranks count, so they stay short however long
-  the list grows. The after function gives the ranks of many items that
-  go to the end of a list at one time:
-
-      (after \"V\" 3)       ;=> (\"W\" \"X\" \"Y\")
+  as a fraction with no trailing zero, and compared as a string. At an end
+  of a list, the ranks count, so they stay short however long the list
+  grows.
 
   This is fractional indexing as Wallace describes it in Realtime Editing
   of Ordered Sequences (Figma, 2017), except that the ranks count at the
@@ -125,15 +114,14 @@
       (str lead (written (plus down -1))))))
 
 (defn between
-  "A rank between `before` and `after`, where nil stands for an end of the
-  list. The rank `before` must sort before `after`, since two equal ranks
-  leave no room, and anything that isn't a rank throws.
+  "A rank between the ranks `before` and `after`, where nil stands for an
+  end of the list. It throws for anything that isn't a rank, or when
+  `before` doesn't sort before `after`.
 
-  After the last rank and before the first, the ranks count: W is after V,
-  and U is before it. The 30 ranks from V to y have one digit. The next
-  3,781 ranks have three digits at most, from z01. The 234,483 ranks after
-  them have five at most, so a list that grows at an end keeps short
-  ranks."
+      (between nil nil)   ;=> \"V\"
+      (between \"V\" nil)   ;=> \"W\"
+      (between \"V\" \"W\")   ;=> \"VV\"
+      (between nil \"V\")   ;=> \"U\""
   [before after]
   (when-not (and (or (nil? before) (= "" before) (rank? before))
                  (or (nil? after) (rank? after)))
@@ -162,23 +150,17 @@
 ;; The tag keeps two batches clear of the interleaving anomaly of Kleppmann
 ;; et al. 2019, section 2: https://doi.org/10.1145/3301419.3323972
 (defn after
-  "The `n` ranks that come after the rank `before`, in order, in a block of
-  their own for the `tag` if given. With nil for `before`, they're the
-  first `n` ranks of a list. Anything that isn't a rank throws.
+  "The `n` ranks after the rank `before`, or the first `n` of a list for
+  nil, in a block of their own for the `tag` if given, e.g. the device's
+  id. It throws for a `before` that isn't a rank.
 
-  Each rank is what between gives after the rank before it. So the ranks
-  of many items are short: 8,000 ranks have five digits at most.
+      (after \"V\" 3)           ;=> (\"W\" \"X\" \"Y\")
+      (after nil 2)            ;=> (\"V\" \"W\")
+      (after \"V\" 3 \"phone\")   ;=> (\"Wf8V\" \"Wf8W\" \"Wf8X\")
 
-      (after \"V\" 3)   ;=> (\"W\" \"X\" \"Y\")
-      (after nil 2)    ;=> (\"V\" \"W\")
-      (after \"x\" 3)   ;=> (\"y\" \"z01\" \"z02\")
-
-  Items that two devices add after the same rank at the same time get the
-  same ranks, so they mix. With a `tag`, such as the device's id, the
-  ranks share a block after `before`, named by two digits of the tag, so
-  each device's items stay together. One rank needs no block.
-
-      (after \"V\" 3 \"phone\")   ;=> (\"Wf8V\" \"Wf8W\" \"Wf8X\")"
+  Without a block, the items that two devices add after the same rank at
+  the same time get the same ranks, and mix. A single rank needs no
+  block."
   ([before n]
    (when-not (or (nil? before) (= "" before) (rank? before))
      (throw (ex-info "Not a rank" {:before before})))

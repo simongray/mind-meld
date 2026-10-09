@@ -2,21 +2,20 @@
   "A CRDT of plain maps, which devices merge in any order without conflict.
 
   A state is a map of collections, each a map of entries, maybe nested by
-  more keys, with the :device that the state belongs to and its :clock. A
-  write stamps an entry with :updated-at and :device, and a removal is an
-  entry with :removed?, a tombstone. Merge keeps the later of two entries,
-  and compact drops the tombstones that every device has seen.
+  more keys, with the :device that the state belongs to and its :clock. An
+  entry is stamped with :updated-at and :device, and a removed entry is a
+  tombstone with :removed?.
 
-  A schema maps the key of each collection to its options: the :depth of
-  its entries, :compact? when compact drops its tombstones, and :count-key
-  for entries that hold a count under that key, which only grows.
+  A schema maps the key of each collection to its options:
+
+  - :depth, the number of keys that lead to each entry
+  - :compact?, to drop its tombstones once every device has seen them
+  - :count-key, the key of a count in each entry, which only grows
 
       {:notes    {:depth 1 :compact? true}
        :listened {:depth 3 :count-key :seconds}}
 
-  The registry of devices, under :devices and :retired, belongs to this
-  namespace and needs no schema. Ordered collections, such as a queue, are
-  in crdt.list.
+  The registry of devices, under :devices and :retired, needs no schema.
 
   The comments name the source of each part, and where it departs from it:
 
@@ -94,8 +93,7 @@
 ;; the stamps ahead of the time, which at-once avoids within one call.
 (defn after
   "The instant to stamp a write to `state` at `at` with: `at`, or the
-  millisecond after the clock of the state when that's later. This keeps
-  each write after what the device has merged."
+  millisecond after the state's clock when that's later."
   [state at]
   (->inst (cond-> (inst-ms at)
             (:clock state) (max (inc (inst-ms (:clock state)))))))
@@ -103,13 +101,9 @@
 (declare later)
 
 (defn write-each
-  "The `state` with each path and function of `writes` applied at `at` as
-  write applies one, all with the same stamp, which becomes the state's
-  clock.
-
-  The `writes` are pairs of a path and a function. Within at-once, the
-  stamp is that of at-once. Within as-device, it's `at` itself, and an
-  entry that's later than the write stays."
+  "The `state` with each of the `writes`, pairs of a path and a function,
+  made at `at` with one stamp: the entry at the path is replaced by what
+  the function returns for it."
   [state writes at]
   (let [foreign?  (contains? state ::author)
         at        (if foreign?
@@ -122,11 +116,9 @@
         (assoc :clock (later-inst (:clock state) at)))))
 
 (defn write
-  "The `state` with the entry at `path` replaced by what `f` returns for
-  it, stamped at `at`, or just after the state's clock when that's later.
-
-  The `f` gets nil when there's no entry yet. An app can write entries of
-  its own this way, which merge then reconciles like the rest."
+  "The `state` with the entry at `path`, or nil, replaced by what `f`
+  returns for it. It's stamped at `at`, or just after the state's clock
+  when that's later."
   [state path f at]
   (write-each state [[path f]] at))
 
@@ -135,13 +127,9 @@
 ;; of the time. That changes the format of every stamp, and its practical
 ;; gain was deemed too small.
 (defn at-once
-  "The `state` after `f` with every write in `f` stamped at the same
-  instant, as one write at `at` would be.
-
-  The `f` takes the state. Without at-once, each write in a series is a
-  millisecond after the one before it, so a long series moves the clock
-  ahead of the time. Wrap a series of an app's own writes in it, e.g. those
-  of an import."
+  "The `state` that `f` returns for it, with every write in `f` stamped as
+  one write at `at`, rather than each a millisecond after the last, e.g.
+  for the writes of an import."
   [state at f]
   (if (contains? state ::at)
     (f state)
@@ -151,14 +139,9 @@
 ;; et al. 2011, section 3.2.1), but these are another device's own times,
 ;; so an act that came later on a slower clock loses.
 (defn as-device
-  "The `state` after `f`, with every write in `f` made as the device
-  `device` at the instants that `f` gives, as a merge of that device's
-  state would bring them.
-
-  The `f` takes the state. An entry of the state that's later than such a
-  write stays, and the clock moves to the write when that's later. This is
-  for what another device or a service did at a time of its own, e.g. the
-  changes that a sync service reports."
+  "The `state` that `f` returns for it, with every write in `f` made by
+  `device` at exactly the instant given, as if merged from that device,
+  e.g. for the changes that a sync service reports."
   [state device f]
   (dissoc (f (assoc state ::author device)) ::author))
 
@@ -173,46 +156,42 @@
          at))
 
 (defn retire
-  "Retire the device `device` from `state` at `at`, from any device.
-
-  The device is no longer among the devices of the state. A sync writes
-  nothing for it and deletes its document, and the device can't undo the
-  retirement by describing itself again."
+  "Retire `device` from `state` at `at`, from any device. A retired device
+  can't come back by describing itself again."
   [state device at]
   (write state [:retired device] identity at))
 
 (defn retired?
-  "Whether `state` has retired the device `device`."
+  "Whether `device` is retired in `state`."
   [state device]
   (contains? (:retired state) device))
 
 (defn devices
-  "The devices of `state` by id, as they described themselves with
-  identify, except the retired ones."
+  "The devices of `state` that aren't retired, as a map of id to what each
+  said of itself."
   [state]
   (apply dissoc (:devices state {}) (keys (:retired state))))
 
 (defn- latest-by-author
-  "The latest stamp of each device among the entries of `state`.
-
-  The device registry is left out, or each acknowledgement would be news to
-  acknowledge, and two devices would keep writing to each other forever."
+  "The latest stamp of each device among the entries of `state`, outside
+  the registry of devices."
   [state]
   (letfn [(walk [m v]
             (cond
               (stamped? v) (update m (:device v) later-inst (:updated-at v))
               (map? v)     (reduce-kv (fn [m _ x] (walk m x)) m v)
               :else        m))]
+    ;; or each acknowledgement would be news to acknowledge, and two devices
+    ;; would keep writing to each other forever
     (walk {} (apply dissoc state :devices header))))
 
 (defn acknowledge
-  "Note in the registry of `state` at `at` that this device has merged the
-  whole `states`.
+  "Note in the registry of `state` at `at` that its device has merged the
+  whole `states`, as the latest stamp of each other device under :seen.
 
-  Its entry keeps the latest stamp of each other device that's now merged
-  here under :seen, which compact goes by. Only whole states count, never
-  the changes that a service sends. The entry is only written when it
-  grew, so that a sync alone never rewrites a document."
+  Only whole states count, never the changes that a service sends. The
+  entry is only written when it grew, so that a sync with nothing new
+  leaves the state as it was."
   [state states at]
   (let [me     (:device state)
         known  (get-in state [:devices me :seen] {})
@@ -224,8 +203,8 @@
       (write state [:devices me] #(assoc % :seen seen) at))))
 
 (def default-keep-for
-  "How long a tombstone is kept once every device has seen it, thirty days
-  in milliseconds, for a device that joins with a state of its own."
+  "How long to keep a tombstone that every device has seen, in
+  milliseconds, for a device that joins with a state of its own."
   (* 30 24 60 60 1000))
 
 ;; Stability (Shapiro et al. 2011, section 4.1, after Wuu and Bernstein,
@@ -234,18 +213,17 @@
 ;; order of their stamps. That's true of the devices in the registry, but
 ;; not of the authors of as-device, so their tombstones stay.
 (defn- seen-by-all?
-  "Whether every live device of `state`, except the one that wrote the
-  entry `e`, has merged it, by the device registry.
-
-  This device counts as having merged what it holds. With no other device,
-  it's false, since a lone device gains nothing by forgetting, and a device
-  that joins later could bring back what it forgot. It's false, too, for an
-  entry of an author outside the registry."
+  "Whether every live device of `state` but the author of the entry `e`
+  has merged it, by the registry of devices. It's false without another
+  device, or for an author outside the registry."
   [state {:keys [device updated-at] :as e}]
   (let [judges (dissoc (devices state) device)]
     (and (contains? (:devices state) device)
+         ;; a lone device gains nothing by forgetting, and a device that
+         ;; joins later could bring back what it forgot
          (seq judges)
          (every? (fn [[id {:keys [seen]}]]
+                   ;; this device has merged what it holds
                    (or (= id (:device state))
                        (some-> (get seen device)
                                inst-ms
@@ -253,14 +231,13 @@
                  judges))))
 
 (defn compact
-  "Drop from `state` at `at` the tombstones of the collections that the
-  `schema` marks :compact?, once every live device has merged them and
-  they're older than the :keep-for of `opts`.
+  "The `state` at `at` without the tombstones of the collections that the
+  `schema` marks :compact?, once every live device has merged them and the
+  :keep-for of `opts` has passed.
 
-  The :keep-for is in milliseconds, default-keep-for by default. A device
-  that stopped syncing holds the compaction back until it's retired (see
-  lagging). The tombstones of an author outside the registry, which
-  as-device writes, stay."
+  The :keep-for is in milliseconds, 30 days by default. A device that
+  stopped syncing holds this back until it's retired, and the tombstones
+  of an author outside the registry stay."
   ([schema state at]
    (compact schema state at {}))
   ([schema state at {:keys [keep-for] :or {keep-for default-keep-for} :as opts}]
@@ -291,10 +268,9 @@
      (reduce-kv compact-in state schema))))
 
 (defn lagging
-  "The live devices of `state` that haven't merged everything this one has,
-  as a map from id to the latest stamp that each merged, or nil.
-
-  Such a device holds compact back until it catches up or is retired."
+  "The live devices of `state` that haven't merged everything its device
+  has, as a map of id to the latest stamp that each merged, or nil. They
+  keep tombstones from being dropped until they catch up or are retired."
   [state]
   (let [me   (:device state)
         seen (get-in state [:devices me :seen] {})
@@ -339,9 +315,9 @@
     (long x)))
 
 (defn- in-order
-  "The value `x` in the form that printed prints, with maps and sets sorted
-  by key-order, a float with no fraction as a whole number, and any other
-  float as its bits, since the platforms print floats differently."
+  "The value `x` in a form that prints the same on both platforms: maps and
+  sets sorted, a float with no fraction as a whole number, and any other
+  float as its bits."
   [x]
   (cond
     (map? x)   (into (sorted-map-by key-order) x)
@@ -350,8 +326,7 @@
     :else      x))
 
 (defn- printed
-  "The entry `e` printed with each value as in-order gives it, so that
-  the string is the same in Clojure and ClojureScript."
+  "The entry `e` printed the same in Clojure and ClojureScript."
   [e]
   (pr-str (walk/postwalk in-order e)))
 
@@ -365,18 +340,16 @@
 ;; ties broken by device as in RFC 677. Deviation: two entries of one device
 ;; at one instant, e.g. from as-device, fall back to the printed entry.
 (defn later
-  "The later of the stamped entries `a` and `b`, the one that merge keeps.
-
-  On the same instant, the greater device id wins, and then the greater
-  printed entry, so that every device picks the same one on either
-  platform. Equal entries aren't printed, since two states that agree tie
-  on all of them."
+  "The later of the stamped entries `a` and `b`. On the same instant, the
+  greater device id wins, and then the greater printed entry, so that
+  every device picks the same one on either platform."
   [a b]
   (cond
     (nil? a)                                 b
     (nil? b)                                 a
     (> (stamp-ms a) (stamp-ms b))            a
     (< (stamp-ms a) (stamp-ms b))            b
+    ;; two states that agree tie on every entry, so equal ones aren't printed
     (= a b)                                  a
     (pos? (compare (tie-key a) (tie-key b))) a
     :else                                    b))
@@ -398,9 +371,8 @@
 ;; merge pointwise and the clock by max (Almeida 2024, section 5.1, figure
 ;; 10). Deviation: any other value is no lattice, so problem names one.
 (defn- join
-  "The merge of the values `a` and `b` under one key of two states, by
-  their shape, as merge describes it. Of two stamped entries, it's the one
-  that `pick-fn` returns."
+  "The merge of the values `a` and `b` at the same place in two states, by
+  their shape, where `pick-fn` picks one of two stamped entries."
   [pick-fn a b]
   (cond
     (nil? a)                  b
@@ -412,18 +384,18 @@
     :else                     a))
 
 (defn merge
-  "Reconcile the states `a` and `b` of two devices by the `schema`, key by
-  key, by the shape of each value:
+  "Merge the states `a` and `b` of two devices by the `schema`, key by key,
+  by the shape of each value:
 
   - a stamped entry is a last-writer-wins register, and the later entry
-    wins whole, even when it's a tombstone
-  - a map of entries merges entry by entry, down through nested maps
+    wins whole, even when it's a tombstone, but in a collection with a
+    :count-key, the higher count wins
+  - a map merges key by key, down to the entries
   - an instant is a max register
-  - any other value is that of `a`, which is why problem names one
+  - any other value is that of `a`
 
-  Of two entries of a collection with a :count-key, it keeps the higher
-  count. The merge is commutative, associative and idempotent, so it's
-  safe to apply in any order and any number of times."
+  The merge is commutative, associative and idempotent, so it's safe to
+  apply in any order and any number of times."
   [schema a b]
   (let [pick-fn (fn [k]
                   (if-let [count-key (get-in schema [k :count-key])]
@@ -457,7 +429,7 @@
 
 (defn- collection-problem
   "A description of the first collection of `state` in the `schema` that
-  isn't a map, or of the first problem entry-problem finds in one."
+  isn't a map, or of the first entry in one that isn't a stamped map."
   [schema state]
   (some (fn [[k {:keys [depth]}]]
           (when-some [entries (get state k)]
@@ -468,8 +440,8 @@
 
 (defn- value-problem
   "A description of the first value in `v`, at `path`, that is neither a
-  map nor in a stamped entry. Merge keeps each device's own such value, so
-  the devices never agree on it."
+  map nor in a stamped entry. Each device keeps its own such value, so the
+  devices never agree on it."
   [path v]
   (cond
     (or (nil? v) (stamped? v))
@@ -507,11 +479,9 @@
         (:devices state)))
 
 (defn problem
-  "A description of what in `state` breaks the rules that merge and
-  compact rely on, given the `schema`, or nil.
-
-  A merge spreads the values of another device to every device, where a
-  bad value makes a function throw, or two devices disagree. The rules:
+  "A description of what in `state` breaks the rules below, given the
+  `schema`, or nil. A bad value from another device spreads to every
+  device, where it makes a function throw, or the devices disagree.
 
   - The state and its collections are maps, and the clock is an instant.
   - Besides the device and the clock, the state holds only maps, down to
@@ -548,12 +518,10 @@
 ;; A delta-state (Almeida, Shoker and Baquero 2018), found by comparing two
 ;; states rather than made by each write.
 (defn changes-since
-  "The part of `state` that isn't in `previous`, or all of it when
-  `previous` is nil, as a partial state that merge takes.
-
-  It's every entry written or merged since, however early its stamp, which
-  is what a sync pushes to a service that wants changes rather than the
-  whole state."
+  "The part of `state` that isn't in the earlier state `previous`, or all
+  of it for nil, e.g. for a service that takes changes rather than whole
+  states. It holds every entry written or merged since, however early its
+  stamp."
   [state previous]
   (let [entries (apply dissoc state header)]
     (into (select-keys state header) (changed-part entries previous))))
