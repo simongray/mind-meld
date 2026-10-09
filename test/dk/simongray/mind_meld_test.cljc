@@ -12,7 +12,7 @@
 
 (def schema
   {:notes {:depth 1 :compact? true}
-   :plays {:depth 2 :count :n}})
+   :plays {:depth 2 :count-key :n}})
 
 (deftest writing-and-the-clock
   (let [s (crdt/write {:device "phone"} [:notes "n1"] (constantly {:text "x"}) t1)]
@@ -39,7 +39,7 @@
         merged (crdt/merge schema phone laptop)]
     (is (= "new" (get-in merged [:notes "n1" :text])) "the later entry")
     (is (= 9 (get-in merged [:plays "song" "phone" :n])) "the higher count, though it's the earlier entry")
-    (is (= 5 (get-in (crdt/merge {} phone laptop) [:plays "song" "phone" :n])) "without a :count, the later entry")
+    (is (= 5 (get-in (crdt/merge {} phone laptop) [:plays "song" "phone" :n])) "without a :count-key, the later entry")
     (is (= "phone" (:device merged)))
     (is (= (dissoc merged :device) (dissoc (crdt/merge schema laptop phone) :device)))
     (testing "two entries of one device at one instant: the same winner on every platform"

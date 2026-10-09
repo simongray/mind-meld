@@ -8,11 +8,11 @@
   and compact drops the tombstones that every device has seen.
 
   A schema maps the key of each collection to its options: the :depth of
-  its entries, :compact? when compact drops its tombstones, and :count for
-  entries that hold a count under that key, which only grows.
+  its entries, :compact? when compact drops its tombstones, and :count-key
+  for entries that hold a count under that key, which only grows.
 
       {:notes    {:depth 1 :compact? true}
-       :listened {:depth 3 :count :seconds}}
+       :listened {:depth 3 :count-key :seconds}}
 
   The registry of devices, under :devices and :retired, belongs to this
   namespace and needs no schema. Ordered collections, such as a queue, are
@@ -207,16 +207,16 @@
 
 (defn acknowledge
   "Note in the registry of `state` at `at` that this device has merged the
-  whole states `others`.
+  whole `states`.
 
   Its entry keeps the latest stamp of each other device that's now merged
   here under :seen, which compact goes by. Only whole states count, never
   the changes that a service sends. The entry is only written when it
   grew, so that a sync alone never rewrites a document."
-  [state others at]
+  [state states at]
   (let [me     (:device state)
         known  (get-in state [:devices me :seen] {})
-        merged (apply merge-with later-inst known (map latest-by-author others))
+        merged (apply merge-with later-inst known (map latest-by-author states))
         seen   (dissoc merged me)]
     (if (and (= seen known)
              (get-in state [:devices me]))
@@ -385,14 +385,14 @@
 ;; ordered as a lexicographic product of count and stamp (Almeida 2024,
 ;; figure 10). Like any G-Counter, it needs one writer per device id.
 (defn- higher
-  "Of the entries `a` and `b`, which hold a count under the key `k`, the
-  one with the higher count, or else the later. A count only grows, so the
-  higher count includes the lower one."
-  [k a b]
-  (let [n #(let [n (get % k)] (if (number? n) n 0))]
-    (if (== (n a) (n b))
+  "Of the entries `a` and `b`, which hold a count under the key `count-key`,
+  the one with the higher count, or else the later. A count only grows, so
+  the higher count includes the lower one."
+  [count-key a b]
+  (let [count-of #(let [n (get % count-key)] (if (number? n) n 0))]
+    (if (== (count-of a) (count-of b))
       (later a b)
-      (max-key n a b))))
+      (max-key count-of a b))))
 
 ;; The join of a state-based CRDT (Shapiro et al. 2011, section 2.3.1): maps
 ;; merge pointwise and the clock by max (Almeida 2024, section 5.1, figure
@@ -400,14 +400,14 @@
 (defn- join
   "The merge of the values `a` and `b` under one key of two states, by
   their shape, as merge describes it. Of two stamped entries, it's the one
-  that `pick` returns."
-  [pick a b]
+  that `pick-fn` returns."
+  [pick-fn a b]
   (cond
     (nil? a)                  b
     (nil? b)                  a
     (and (map? a) (map? b))   (if (or (stamped? a) (stamped? b))
-                                (pick a b)
-                                (merge-with (partial join pick) a b))
+                                (pick-fn a b)
+                                (merge-with (partial join pick-fn) a b))
     (and (inst? a) (inst? b)) (later-inst a b)
     :else                     a))
 
@@ -421,17 +421,17 @@
   - an instant is a max register
   - any other value is that of `a`, which is why problem names one
 
-  Of two entries of a collection with a :count, it keeps the higher count.
-  The merge is commutative, associative and idempotent, so it's safe to
-  apply in any order and any number of times."
+  Of two entries of a collection with a :count-key, it keeps the higher
+  count. The merge is commutative, associative and idempotent, so it's
+  safe to apply in any order and any number of times."
   [schema a b]
-  (let [pick (fn [k]
-               (if-let [n (get-in schema [k :count])]
-                 (partial higher n)
-                 later))
-        ks   (disj (into (set (keys a)) (keys b)) :device)]
+  (let [pick-fn (fn [k]
+                  (if-let [count-key (get-in schema [k :count-key])]
+                    (partial higher count-key)
+                    later))
+        ks      (disj (into (set (keys a)) (keys b)) :device)]
     (into {:device (:device a)}
-          (map (fn [k] [k (join (pick k) (get a k) (get b k))]))
+          (map (fn [k] [k (join (pick-fn k) (get a k) (get b k))]))
           ks)))
 
 (defn- clock-problem
@@ -529,16 +529,16 @@
     "the state is not a map"))
 
 (defn- changed-part
-  "The part of `v` that isn't in `was`, the value at the same place in an
-  earlier state, or nil when nothing changed."
-  [v was]
+  "The part of `v` that isn't in `previous`, the value at the same place in
+  an earlier state, or nil when nothing changed."
+  [v previous]
   (cond
     (stamped? v)
-    (when (not= v was) v)
+    (when (not= v previous) v)
 
     (map? v)
     (not-empty (into {} (keep (fn [[k x]]
-                                (some->> (changed-part x (get was k))
+                                (some->> (changed-part x (get previous k))
                                          (vector k))))
                      v))
 
@@ -561,7 +561,7 @@
 (comment
   (def schema
     {:notes {:depth 1 :compact? true}
-     :plays {:depth 2 :count :n}})
+     :plays {:depth 2 :count-key :n}})
 
   (def phone
     (-> {:device "phone"}

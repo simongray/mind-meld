@@ -52,13 +52,13 @@
              moves))
 
 (defn rank-between
-  "A rank between the entries `before` and `after` of the ordered
-  `entries`, either nil at an end, and after any entries that share the
-  rank of `before`."
-  [entries before after]
-  (let [a (some->> before (get entries) :rank)
-        b (when after
-            (->> (drop-while #(not= after (key %)) (ranked entries))
+  "A rank between the entries of the ids `before-id` and `after-id` of the
+  ordered `entries`, either nil at an end, and after any entries that
+  share the rank of `before-id`."
+  [entries before-id after-id]
+  (let [a (some->> before-id (get entries) :rank)
+        b (when after-id
+            (->> (drop-while #(not= after-id (key %)) (ranked entries))
                  (map (comp :rank val))
                  (filter #(or (nil? a) (pos? (compare % a))))
                  first))]
