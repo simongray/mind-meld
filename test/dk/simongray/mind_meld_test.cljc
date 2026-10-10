@@ -142,3 +142,15 @@
     (is (re-find found (str (crdt/problem schema state))) (pr-str state)))
   (is (= "the state is not a map" (crdt/problem schema [1 2]))))
 
+(deftest what-a-schema-may-not-hold
+  (is (nil? (crdt/schema-problem schema)))
+  (is (nil? (crdt/schema-problem {:queue {:depth 1 :ranked? true :compact? true} :settings {:depth 0}})))
+  (doseq [[s found] [[[:notes] #"schema is not a map"]
+                     [{:notes [1]} #"options of :notes are not a map"]
+                     [{:notes {:compact? true}} #":depth of :notes is nil"]
+                     [{:notes {:depth -1}} #"not a whole number"]
+                     [{:plays {:depth 2 :count :n}} #":plays has the unknown option :count"]
+                     [{:clock {:depth 0}} #":clock is a key that the state holds"]
+                     [{:devices {:depth 1}} #":devices is a key that the state holds"]]]
+    (is (re-find found (str (crdt/schema-problem s))) (pr-str s))))
+

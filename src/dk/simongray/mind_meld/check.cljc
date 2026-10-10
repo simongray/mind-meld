@@ -1,6 +1,6 @@
 (ns ^:no-doc dk.simongray.mind-meld.check
-  "Checks of a state from another device: each describes the first value
-  that breaks its rule, or gives nil."
+  "Checks of a state from another device, and of a schema: each describes
+  the first value that breaks its rule, or gives nil."
   (:require [dk.simongray.mind-meld.entry :as entry]))
 
 (defn clock-problem
@@ -77,3 +77,35 @@
             (str "what device " (pr-str id)
                  " has seen is not a map of instants")))
         (:devices state)))
+
+(def options
+  "The options of a collection in a schema."
+  #{:depth :compact? :count-key :ranked?})
+
+(defn- options-problem
+  "A description of what in the options `opts` of the collection `k`
+  breaks a rule, or nil."
+  [k opts]
+  (cond
+    (not (map? opts))
+    (str "the options of " k " are not a map")
+
+    (not (nat-int? (:depth opts)))
+    (str "the :depth of " k " is " (pr-str (:depth opts))
+         ", not a whole number from 0")
+
+    :else
+    (when-some [unknown (first (remove options (keys opts)))]
+      (str k " has the unknown option " unknown))))
+
+(defn schema-problem
+  "A description of the first collection of `schema` that breaks a rule,
+  or nil, where the `reserved` keys are those that a state holds itself."
+  [schema reserved]
+  (if (map? schema)
+    (some (fn [[k opts]]
+            (if (contains? reserved k)
+              (str k " is a key that the state holds itself")
+              (options-problem k opts)))
+          schema)
+    "the schema is not a map"))

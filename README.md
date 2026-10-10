@@ -72,7 +72,9 @@ time each was made:
 The `:depth` of the notes is 1, since one key, the note's id, leads to
 each of them. With `:compact? true`, the tombstones of removed notes can
 be dropped once every device has seen them, as described
-[below](#tombstones-and-devices).
+[below](#tombstones-and-devices). To catch a mistake in a schema, e.g. in
+a test, `crdt/schema-problem` describes an unknown option or a missing
+`:depth`.
 
 To sync, a device merges the states of the others into its own:
 

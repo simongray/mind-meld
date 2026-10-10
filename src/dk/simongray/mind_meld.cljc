@@ -176,6 +176,19 @@
              check/seen-problem]))
     "the state is not a map"))
 
+(defn schema-problem
+  "A description of what in `schema` breaks the rules below, or nil. A bad
+  schema can make a function throw, or an option do nothing, e.g. one with
+  a misspelt name.
+
+  - The schema is a map of the key of each collection to its options.
+  - The options are a map with a :depth, a whole number from 0.
+  - The only options are :depth, :compact?, :count-key and :ranked?.
+  - No collection is under :device, :clock, :devices or :retired, which
+    the state holds itself."
+  [schema]
+  (check/schema-problem schema (into header (keys registry/schema))))
+
 ;; A delta-state (Almeida, Shoker and Baquero 2018), found by comparing two
 ;; states rather than made by each write.
 (defn changes-since
