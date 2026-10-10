@@ -1,6 +1,8 @@
 mind-meld
 =========
 
+> _My mind to your mind. My thoughts to your thoughts._
+
 This is a Clojure and ClojureScript library for keeping an app's data the
 same on all of a user's devices without a server to merge it, e.g. the
 notes of a notes app, the queue of a podcast app, or the settings of any
