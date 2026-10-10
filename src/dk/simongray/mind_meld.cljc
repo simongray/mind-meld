@@ -245,7 +245,9 @@
 
   The :keep-for is in milliseconds, 30 days by default. A device that
   stopped syncing holds this back until it's retired, and the tombstones
-  of an author outside the registry stay."
+  of an author outside the registry stay. A change from such an author
+  with an earlier stamp than a tombstone that was dropped brings its entry
+  back, so the :keep-for should be longer than its changes can be late."
   ([schema state at]
    (compact schema state at {}))
   ([schema state at {:keys [keep-for] :or {keep-for default-keep-for} :as opts}]
