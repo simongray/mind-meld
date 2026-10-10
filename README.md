@@ -8,23 +8,22 @@ same on all of a user's devices without a server to merge it, e.g. the
 notes of a notes app, the queue of a podcast app, or the settings of any
 app. Each device keeps the data as a plain map and can change it offline,
 and any two of those maps merge without conflict, in any order. It's a
-CRDT, a conflict-free replicated data type.
+[CRDT](https://crdt.tech/), a conflict-free replicated data type, for
+[local-first](https://www.inkandswitch.com/essay/local-first/) apps.
 
-- **Plain data.** The state is a map that prints as EDN, so you can keep
-  it anywhere that stores text, e.g. a folder that Dropbox syncs, a
-  WebDAV server or IndexedDB. The companion library
-  [like-minded](https://github.com/simongray/like-minded) syncs it through
-  any of them.
-- **The later change wins.** Each entry is stamped with the time and the
-  device of its last change. A removed entry stays as a tombstone, marked
-  `:removed?`, so that an older copy of it can't bring it back.
-- **Ordered lists.** A queue has the same order on every device, the
-  items that a device appends together don't mix with another device's,
-  and a move never brings back an item that another device removed.
-- **Counts.** Of two copies of a count that only grows, e.g. the seconds
-  listened on one device, the merge keeps the higher.
-- **Tidying up.** A registry of the devices records what each has
-  merged, so that a tombstone can be dropped once every device has it.
+**NOTE:** It's the companion of
+[like-minded](https://github.com/simongray/like-minded): like-minded gets
+the states from each device to the others, and mind-meld merges them
+without conflict.
+
+- **No server to run.** The state is a Clojure map that prints as EDN,
+  so the devices can sync it through storage the user already has.
+- **Lists that don't get scrambled.** A queue or a playlist has the same
+  order on every device.
+- **Counts that only go up.** A count such as the seconds listened on
+  each device keeps its highest value.
+- **Deletions that don't pile up.** Removed entries can be dropped once
+  every device has seen the removal.
 
 The same code runs on the JVM, in Node and in the browser, with the same
 results on each.
@@ -74,8 +73,8 @@ time each was made:
 ```
 
 The `:depth` of the notes is 1, since one key, the note's id, leads to
-each of them. With `:compact? true`, the tombstones of removed notes can
-be dropped once every device has seen them, as described
+each of them. With `:compact? true`, removed notes can be dropped for
+good once every device has seen the removal, as described
 [below](#tombstones-and-devices). To catch a mistake in a schema, e.g. in
 a test, `crdt/schema-problem` describes an unknown option or a missing
 `:depth`.
@@ -97,8 +96,9 @@ To sync, a device merges the states of the others into its own:
 The merge gives the same result in any order and any number of times, so
 the devices can sync through anything that stores a file. Where two
 devices changed the same entry, the later change wins. A removal is a
-change too, which leaves a tombstone, e.g. when the laptop has synced and
-removes the milk note:
+change too: the entry stays as a [tombstone](https://crdt.tech/glossary),
+marked `:removed?`, so that an older copy of it can't bring it back. Say
+the laptop has synced and removes the milk note:
 
 ```clojure
 (crdt/write (crdt/merge schema laptop phone)
@@ -205,14 +205,16 @@ Principles
 ----------
 
 - **Standards first.** Each part follows a published design, e.g. the
-  last-writer-wins register and element set of Shapiro et al. The code
+  [last-writer-wins](https://crdt.tech/glossary) register and element set
+  of [Shapiro et al.](https://inria.hal.science/inria-00555588) The code
   cites its sources, and says where it departs from them.
 - **Merge by shape.** The merge goes key by key, down through maps to the
   stamped entries, so a state can grow new collections, and an older
   version of an app still merges them.
 - **A clock that only moves forward.** A write is stamped after anything
-  the device has merged, as a hybrid logical clock does, but with no
-  counter, so a stamp stays a plain instant.
+  the device has merged, as a
+  [hybrid logical clock](https://cse.buffalo.edu/tech-reports/2014-04.pdf)
+  does, but with no counter, so a stamp stays a plain instant.
 - **The same winner everywhere.** Of two entries with the same stamp, the
   device id decides, and then the entry as printed, which is the same on
   every platform.
