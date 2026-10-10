@@ -12,7 +12,9 @@ CRDT, a conflict-free replicated data type.
 
 - **Plain data.** The state is a map that prints as EDN, so you can keep
   it anywhere that stores text, e.g. a folder that Dropbox syncs, a
-  WebDAV server or IndexedDB.
+  WebDAV server or IndexedDB. The companion library
+  [like-minded](https://github.com/simongray/like-minded) syncs it through
+  any of them.
 - **The later change wins.** Each entry is stamped with the time and the
   device of its last change. A removed entry stays as a tombstone, marked
   `:removed?`, so that an older copy of it can't bring it back.
