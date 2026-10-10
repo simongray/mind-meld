@@ -40,7 +40,9 @@ It requires Clojure 1.11+ and Java 11+. Add it to the `:deps` in your
 `master`:
 
 ```clojure
-io.github.simongray/mind-meld {:git/sha "…"}
+dk.simongray/mind-meld
+{:git/url "https://github.com/simongray/mind-meld"
+ :git/sha "…"}
 ```
 
 For ClojureScript, also set `:deps true` in your `shadow-cljs.edn`, since
