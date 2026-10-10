@@ -52,8 +52,8 @@
 
 (defn rank-between
   "A rank between the entries of the ids `before-id` and `after-id` of the
-  ordered `entries`, either nil for an end, and after any entries that
-  share the rank of `before-id`."
+  ordered `entries`, either of which can be nil for an end, and after any
+  entries that share the rank of `before-id`."
   [entries before-id after-id]
   (let [a (some->> before-id (get entries) :rank)
         b (when after-id
@@ -95,12 +95,12 @@
 ;; devices still tie.
 (defn appended
   "The writes that put the `ids` in order at the end of the ordered
-  `entries` at `path` in `state`, with their moves, as pairs of a path and
-  a function.
+  `entries` at `path` in `state`, as pairs of a path and a function.
 
-  An id that's already there stays where it is. The ranks are in a block
-  of the state's device, so that ids that another device appends at the
-  same time don't mix with them."
+  The `entries` should have their moves applied, so that the ids go after
+  an entry that was moved to the end. An id that's already there stays
+  where it is. The ranks are in a block of the state's device, so that ids
+  that another device appends at the same time don't mix with them."
   [state path entries ids]
   (let [fresh (remove #(crdt/live? (get entries %)) (distinct ids))
         ranks (rank/after (last-rank entries) (count fresh) (:device state))]
@@ -111,7 +111,8 @@
 
 (defn append
   "The `state` with the `ids` written at `at` to the end of the ordered
-  `entries` at `path`, with their moves, unless they're there already."
+  `entries` at `path`, unless they're there already. The `entries` should
+  have their moves applied."
   [state path entries ids at]
   (if-let [writes (seq (appended state path entries ids))]
     (crdt/write-each state writes at)

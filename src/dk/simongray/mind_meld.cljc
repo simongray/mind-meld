@@ -17,7 +17,8 @@
 
   The registry of devices, under :devices and :retired, needs no schema.
 
-  The comments name the source of each part, and where it departs from it:
+  The comments in the code name the source of each part, and where it
+  departs from it:
 
   - Shapiro, Preguiça, Baquero and Zawirski, A comprehensive study of
     Convergent and Commutative Replicated Data Types, INRIA RR-7506, 2011,
@@ -69,9 +70,9 @@
        (mapv key)))
 
 (defn later
-  "The later of the stamped entries `a` and `b`. On the same instant, the
-  greater device id wins, and then the greater printed entry, so that
-  every device picks the same one on either platform."
+  "The later of the stamped entries `a` and `b`. At the same instant, the
+  greater device id wins, and then the greater printed entry, so that the
+  winner is the same on every device and platform."
   [a b]
   (entry/later a b))
 
@@ -102,9 +103,9 @@
         (assoc :clock (later-inst (:clock state) at)))))
 
 (defn write
-  "The `state` with the entry at `path`, or nil, replaced by what `f`
-  returns for it. It's stamped at `at`, or just after the state's clock
-  when that's later."
+  "The `state` with the entry at `path` replaced by what `f` returns for
+  it, or for nil when there's none. It's stamped at `at`, or just after
+  the state's clock when that's later."
   [state path f at]
   (write-each state [[path f]] at))
 
@@ -179,9 +180,9 @@
 ;; states rather than made by each write.
 (defn changes-since
   "The part of `state` that isn't in the earlier state `previous`, or all
-  of it for nil, e.g. for a service that takes changes rather than whole
-  states. It holds every entry written or merged since, however early its
-  stamp."
+  of it when `previous` is nil, e.g. for a service that takes changes
+  rather than whole states. It holds every entry written or merged since,
+  however early its stamp."
   [state previous]
   (let [entries (apply dissoc state header)]
     (into (select-keys state header) (tree/changed-part entries previous))))
@@ -197,8 +198,8 @@
          at))
 
 (defn retire
-  "Retire `device` from `state` at `at`, from any device. A retired device
-  can't come back by describing itself again."
+  "Retire `device` from `state` at `at`. Any device can retire another,
+  and a retired device can't come back by describing itself again."
   [state device at]
   (write state [:retired device] identity at))
 
@@ -218,8 +219,8 @@
   whole `states`, as the latest stamp of each other device under :seen.
 
   Only whole states count, never the changes that a service sends. The
-  entry is only written when it grew, so that a sync with nothing new
-  leaves the state as it was."
+  device's entry is only written when :seen grows, so that a sync with
+  nothing new leaves the state as it was."
   [state states at]
   (let [me     (:device state)
         known  (get-in state [:devices me :seen] {})
@@ -233,13 +234,14 @@
 
 (def default-keep-for
   "How long to keep a tombstone that every device has seen, in
-  milliseconds, for a device that joins with a state of its own."
+  milliseconds, so that a device that joins later with a state of its own
+  still gets it."
   (* 30 24 60 60 1000))
 
 (defn compact
   "The `state` at `at` without the tombstones of the collections that the
-  `schema` marks :compact?, once every live device has merged them and the
-  :keep-for of `opts` has passed.
+  `schema` marks :compact?, once every device that isn't retired has
+  merged them and the :keep-for of `opts` has passed.
 
   The :keep-for is in milliseconds, 30 days by default. A device that
   stopped syncing holds this back until it's retired, and the tombstones
@@ -261,9 +263,10 @@
      (reduce-kv compact-in state schema))))
 
 (defn lagging
-  "The live devices of `state` that haven't merged everything its device
-  has, as a map of id to the latest stamp that each merged, or nil. They
-  keep tombstones from being dropped until they catch up or are retired."
+  "The devices of `state` that aren't retired and haven't merged
+  everything its device has, as a map of id to the stamp up to which each
+  has merged everything, or nil. They keep tombstones from being dropped
+  until they catch up or are retired."
   [state]
   (let [me   (:device state)
         seen (get-in state [:devices me :seen] {})

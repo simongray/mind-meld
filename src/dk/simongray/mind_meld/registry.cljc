@@ -33,9 +33,10 @@
 ;; order of their stamps. That's true of the devices in the registry, but
 ;; not of the authors of as-device, so their tombstones stay.
 (defn seen-by-all?
-  "Whether every one of the live `devices` of `state` but the author of the
-  entry `e` has merged it, by the registry of devices. It's false without
-  another device, or for an author outside the registry."
+  "Whether every one of the `devices` of `state` that aren't retired,
+  except the author of the entry `e`, has merged it, by the registry of
+  devices. It's false without another device, or for an author outside
+  the registry."
   [state devices {:keys [device updated-at] :as e}]
   (let [judges (dissoc devices device)]
     (and (contains? (:devices state) device)

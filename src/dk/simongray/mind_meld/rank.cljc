@@ -3,13 +3,14 @@
   for another between any two.
 
   A rank is digits in base 62, from 0 to 9, A to Z and a to z. It's read
-  as a fraction with no trailing zero, and compared as a string. At an end
-  of a list, the ranks count, so they stay short however long the list
-  grows.
+  as a fraction with no trailing zero, and compared as a string. At either
+  end of a list, the ranks count up or down like numbers, so they stay
+  short however long the list grows.
 
   This is fractional indexing as Wallace describes it in Realtime Editing
-  of Ordered Sequences (Figma, 2017), except that the ranks count at the
-  ends: https://www.figma.com/blog/realtime-editing-of-ordered-sequences/"
+  of Ordered Sequences (Figma, 2017), except that the ranks count like
+  numbers at the ends:
+  https://www.figma.com/blog/realtime-editing-of-ordered-sequences/"
   (:require [clojure.string :as str]))
 
 (def ^:no-doc digits
@@ -52,8 +53,8 @@
                (midpoint (subs a (min 1 (count a))) nil)))))))
 
 ;; At an end of a list, the ranks count in levels. After the last rank, a
-;; rank of level k is k times z, and then a number of k + 1 digits that
-;; does not start with z: V to y, then z01 to zyz, then zz001 to zzyzz.
+;; rank of level k is z repeated k times, and then a number of k + 1 digits
+;; that does not start with z: V to y, then z01 to zyz, then zz001 to zzyzz.
 ;; Before the first rank, 0 is in the place of z, and the numbers count
 ;; down. Each level has 62 times the room of the level before it.
 

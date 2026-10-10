@@ -85,9 +85,9 @@
 ;; ties broken by device as in RFC 677. Deviation: two entries of one device
 ;; at one instant, e.g. from as-device, fall back to the printed entry.
 (defn later
-  "The later of the stamped entries `a` and `b`. On the same instant, the
-  greater device id wins, and then the greater printed entry, so that
-  every device picks the same one on either platform."
+  "The later of the stamped entries `a` and `b`. At the same instant, the
+  greater device id wins, and then the greater printed entry, so that the
+  winner is the same on every device and platform."
   [a b]
   (cond
     (nil? a)                                 b
