@@ -11,8 +11,8 @@ and any two of those maps merge without conflict, in any order. It's a
 CRDT, a conflict-free replicated data type.
 
 - **Plain data.** The state is a map that prints as EDN, so you can keep
-  it anywhere a file can go, e.g. a folder that Dropbox syncs, a WebDAV
-  server or IndexedDB.
+  it anywhere that stores text, e.g. a folder that Dropbox syncs, a
+  WebDAV server or IndexedDB.
 - **The later change wins.** Each entry is stamped with the time and the
   device of its last change. A removed entry stays as a tombstone, marked
   `:removed?`, so that an older copy of it can't bring it back.
@@ -28,10 +28,9 @@ The same code runs on the JVM, in Node and in the browser, with the same
 results on each.
 
 > This library was spun out of [podcast-clj](https://github.com/simongray/podcast-clj),
-> a library for making podcast software, which uses it to sync a
-> listener's subscriptions, queue and play progress between their
-> devices. Like podcast-clj, it was developed with assistance from
-> frontier LLMs.
+> a library for making podcast software. There, it syncs a listener's
+> subscriptions, queue and play progress between their devices. Like
+> podcast-clj, it was developed with assistance from frontier LLMs.
 
 Getting started
 ---------------
@@ -110,7 +109,7 @@ tombstone.
 Other functions cover imports and the rest of a sync:
 
 - With `crdt/at-once`, a series of writes gets one stamp, e.g. those of
-  an import. Without it, writes made at one time are stamped a
+  an import. Without it, writes given the same time are stamped a
   millisecond apart, since a write is always stamped later than the
   state's clock.
 - With `crdt/as-device`, you can write what another device or a service
@@ -124,9 +123,9 @@ Ordered lists
 -------------
 
 An ordered collection, e.g. a queue, is a map of ids to entries with a
-`:rank`, a string that sorts by place. A move goes in a second collection
-that holds only the new ranks, so a move never brings back an item that
-another device removed:
+`:rank`, a string that sorts in the order of the list. A move goes in a
+second collection that holds only the new ranks, so a move never brings
+back an item that another device removed:
 
 ```clojure
 (require '[dk.simongray.mind-meld.list :as crdt.list])
@@ -171,8 +170,8 @@ another device removed:
 ;; => ["d" "c" "a" "b"]
 ```
 
-The ids that a device appends together share a block of ranks named after
-the device, so the two devices' items don't mix. With `:ranked? true`,
+The ids that a device appends together share a block of ranks of its own,
+so the two devices' items don't mix. With `:ranked? true`,
 `crdt.list/problem` checks the ranks of a collection, as `crdt/problem`
 checks the rest.
 
@@ -185,15 +184,16 @@ Tombstones and devices
 
 Tombstones pile up, so `crdt/compact` drops those of the collections with
 `:compact? true` once every device has merged them and they're older than
-its `:keep-for` option, 30 days by default. The state holds a registry of
-the devices, which records what each has merged:
+the `:keep-for` option you pass it, 30 days by default. The state holds a
+registry of the devices, which records what each has merged:
 
 - Each device describes itself once with `crdt/identify`, e.g. with its
   name and platform.
-- After it merges the whole states of other devices, it records that it
-  has merged them with `crdt/acknowledge`.
-- A device that stops syncing holds compaction back. `crdt/lagging` lists
-  such devices, and `crdt/retire` removes one for good.
+- After it merges the whole states of other devices, it records this
+  with `crdt/acknowledge`.
+- A device that stops syncing holds compaction back. You can find such
+  devices with `crdt/lagging`, and retire one for good with
+  `crdt/retire`.
 
 Principles
 ----------
@@ -211,8 +211,8 @@ Principles
   device id decides, and then the entry as printed, which is the same on
   every platform.
 - **Forget only what everyone has seen.** A tombstone is only dropped once
-  every device in the registry has merged it, so no device in the registry
-  can bring back what the others forgot.
+  every device in the registry that isn't retired has merged it, so none
+  of those devices can bring back what the others forgot.
 - **One codebase.** The library is written in `.cljc`, with no
   dependencies but Clojure.
 
