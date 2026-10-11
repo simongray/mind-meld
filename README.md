@@ -1,6 +1,8 @@
 mind-meld
 =========
 
+[![Clojars Project](https://img.shields.io/clojars/v/dk.simongray/mind-meld.svg)](https://clojars.org/dk.simongray/mind-meld)
+
 > _My mind to your mind. My thoughts to your thoughts._
 
 This is a Clojure and ClojureScript library for keeping an app's data the
@@ -36,9 +38,16 @@ results on each.
 Getting started
 ---------------
 
-It requires Clojure 1.11+ and Java 11+. Add it to the `:deps` in your
-`deps.edn` as a Git dependency, with the SHA of the latest commit on
-`master`:
+It requires Clojure 1.11+ and Java 11+. For the latest release, add it
+from [Clojars](https://clojars.org/dk.simongray/mind-meld) to the `:deps`
+in your `deps.edn`:
+
+```clojure
+dk.simongray/mind-meld {:mvn/version "0.1.0"}
+```
+
+For changes that aren't released yet, use the SHA of the latest commit on
+`master` instead:
 
 ```clojure
 dk.simongray/mind-meld
@@ -46,8 +55,8 @@ dk.simongray/mind-meld
  :git/sha "…"}
 ```
 
-For ClojureScript, also set `:deps true` in your `shadow-cljs.edn`, since
-shadow-cljs only reads Git dependencies from `deps.edn`.
+For ClojureScript, shadow-cljs only reads Git dependencies from
+`deps.edn`, so also set `:deps true` in your `shadow-cljs.edn`.
 
 A state is a map with the id of its device, and a schema names its
 collections. Each device writes its changes with `crdt/write` and the
