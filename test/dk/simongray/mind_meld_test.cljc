@@ -130,6 +130,42 @@
     (is (= phone (crdt/compact schema phone t3)) "a young tombstone stays")
     (is (= {} (crdt/lagging phone)))))
 
+(deftest field-wise-entries
+  (let [base   (crdt/write-fields {:device "phone"} [:notes "n1"] (constantly {:title "Milk" :body "2 l"}) t0)
+        phone  (crdt/write-fields base [:notes "n1"] #(assoc % :title "Oat milk") t1)
+        laptop (crdt/write-fields (assoc base :device "laptop") [:notes "n1"] #(assoc % :body "3 l") t2)
+        note   #(let [e (get-in % [:notes "n1"])]
+                  (cond-> (crdt/fields e) (:removed? e) (assoc :removed? true)))]
+    (is (= {:title "Oat milk" :body "3 l"}
+           (note (crdt/merge schema phone laptop))
+           (note (crdt/merge schema laptop phone)))
+        "two devices change different fields, and both changes stay")
+    (is (= {:removed? true}
+           (note (crdt/merge schema (crdt/write-fields phone [:notes "n1"] #(assoc % :removed? true) t3) laptop)))
+        "a removal after the edits removes the entry and its fields")
+    (is (= {:body "3 l"}
+           (note (crdt/merge schema (crdt/write-fields base [:notes "n1"] #(assoc % :removed? true) t1) laptop)))
+        "and an edit after a removal brings back the entry with what was written after the removal")
+    (testing "a field that goes"
+      (let [gone (crdt/write-fields laptop [:notes "n1"] #(dissoc % :body) t3)]
+        (is (= {:title "Milk"} (note gone)))
+        (is (= {:title "Oat milk"} (note (crdt/merge schema phone gone))) "goes from the merge too")))
+    (testing "an entry that write-fields wrote"
+      (let [plain (crdt/write phone [:notes "n1"] #(assoc % :title "Soy milk") t3)]
+        (is (= t3 (get-in plain [:notes "n1" :stamps :title :updated-at]))
+            "stays field-wise when write writes it")
+        (is (= t0 (get-in plain [:notes "n1" :stamps :body :updated-at]))
+            "with the stamps of the fields it didn't change")))
+    (is (= {:title "Oat milk" :body "2 l"}
+           (note (crdt/merge schema phone (crdt/write (assoc base :device "laptop") [:notes "n1"]
+                                                      (constantly {:title "Milk" :body "2 l"}) t0))))
+        "an entry written whole counts as each of its fields written at its stamp")
+    (let [merged (crdt/merge schema (crdt/write-fields phone [:notes "n1"] #(assoc % :title "Rice milk") t3) laptop)]
+      (is (= {"phone" t3 "laptop" t2}
+             (get-in (crdt/acknowledge (assoc merged :device "car") [merged] t3) [:devices "car" :seen]))
+          "a field's stamp counts as what its device has written, though the entry is another's")
+      (is (nil? (crdt/problem schema merged))))))
+
 (deftest what-another-device-may-not-send
   (is (nil? (crdt/problem schema {:device "x" :clock t0 :notes {"n1" {:updated-at t0 :device "x"}}})))
   (doseq [[state found] [[{:clock "now"} #"clock"]
@@ -138,7 +174,11 @@
                          [{:plays {"song" {:n 5 :updated-at t0 :device "x"}}} #"\[:plays \"song\" :n\] is not a map"]
                          [{:theme "dark"} #"\[:theme\] is not in a stamped entry"]
                          [{:devices {"x" {:seen {"y" 5} :updated-at t0 :device "x"}}} #"seen"]
-                         [{:retired {"x" {}}} #"not stamped"]]]
+                         [{:retired {"x" {}}} #"not stamped"]
+                         [{:notes {"n1" {:text "x" :updated-at t0 :device "x" :stamps {:text {:updated-at "now"}}}}}
+                          #"fields of the entry at \[:notes \"n1\"\] are not stamped"]
+                         [{:plays {"song" {"x" {:n 5 :updated-at t0 :device "x" :stamps {}}}}}
+                          #"field-wise in a collection that counts"]]]
     (is (re-find found (str (crdt/problem schema state))) (pr-str state)))
   (is (= "the state is not a map" (crdt/problem schema [1 2]))))
 

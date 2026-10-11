@@ -10,13 +10,15 @@
    :retired {:depth 1}})
 
 (defn latest-by-author
-  "The latest stamp of each device among the entries of `state`, outside
-  the registry of devices."
+  "The latest stamp of each device among the entries of `state`, and the
+  fields of the field-wise ones, outside the registry of devices."
   [state]
-  (letfn [(walk [m v]
+  (letfn [(stamp [m {:keys [device updated-at]}]
+            (update m device entry/later-inst updated-at))
+          (walk [m v]
             (cond
               (entry/stamped? v)
-              (update m (:device v) entry/later-inst (:updated-at v))
+              (reduce stamp (stamp m v) (vals (:stamps v)))
 
               (map? v)
               (reduce-kv (fn [m _ x] (walk m x)) m v)

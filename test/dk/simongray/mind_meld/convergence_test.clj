@@ -11,6 +11,7 @@
 
 (def schema
   {:notes {:depth 1 :compact? true}
+   :cards {:depth 1 :compact? true}
    :plays {:depth 2 :count-key :n}
    :queue {:depth 1 :ranked? true :compact? true}
    :moves {:depth 1 :ranked? true}})
@@ -35,10 +36,16 @@
    (gen/tuple (gen/return :append) (gen/vector ids 1 3) instants)
    (gen/tuple (gen/return :move) ids (gen/choose 0 3) instants)
    (gen/tuple (gen/return :dequeue) ids instants)
-   (gen/tuple (gen/return :identify) (gen/elements ["Mine" "Yours"]) instants)])
+   (gen/tuple (gen/return :identify) (gen/elements ["Mine" "Yours"]) instants)
+   (gen/tuple (gen/return :field) ids (gen/elements [:title :body :done]) (gen/elements ["x" "y" 1.55 nil]) instants)
+   (gen/tuple (gen/return :unfield) ids (gen/elements [:title :body :done]) instants)
+   (gen/tuple (gen/return :remove-card) ids instants)
+   (gen/tuple (gen/return :restore-card) ids instants)
+   (gen/tuple (gen/return :plain-card) ids (gen/elements ["x" "y"]) instants)])
 
 (def service-change
-  (gen/tuple (gen/return :service) ids instants))
+  (gen/one-of [(gen/tuple (gen/return :service) ids instants)
+               (gen/tuple (gen/return :service-field) ids (gen/elements ["x" "y"]) instants)]))
 
 (def retirement
   (gen/tuple (gen/return :retire) (gen/elements devices) instants))
@@ -49,8 +56,14 @@
   (crdt.list/with-moves (:queue state) (:moves state)))
 
 (defn- apply-change
-  [state [kind x y z]]
+  [state [kind x y z w]]
   (case kind
+    :field         (crdt/write-fields state [:cards x] #(assoc % y z) w)
+    :unfield       (crdt/write-fields state [:cards x] #(dissoc % y) z)
+    :remove-card   (crdt/write-fields state [:cards x] #(assoc % :removed? true) y)
+    :restore-card  (crdt/write-fields state [:cards x] #(dissoc % :removed?) y)
+    :plain-card    (crdt/write state [:cards x] #(assoc % :tag y) z)
+    :service-field (crdt/as-device state "service" #(crdt/write-fields % [:cards x] (fn [c] (assoc c :title y)) z))
     :note     (crdt/write state [:notes x] (constantly {:text y}) z)
     :remove   (crdt/write state [:notes x] #(assoc % :removed? true) y)
     :play     (crdt/write state [:plays x (:device state)] #(update % :n (fnil + 0) y) z)
@@ -141,16 +154,22 @@
             (map-indexed vector (concat steps rounds)))))
 
 (defn- shown
-  "What `state` shows: its live notes, its queue in order and its counts."
+  "What `state` shows: its live notes and cards, its queue in order and its
+  counts."
   [state]
   {:notes (into {} (filter (comp crdt/live? val)) (:notes state))
+   ;; a card keeps the stamps of the fields that went and of its last
+   ;; removal, which compaction drops with a tombstone, so it shows its fields
+   :cards (into {}
+                (keep (fn [[k v]] (when (crdt/live? v) [k (crdt/fields v)])))
+                (:cards state))
    :queue (mapv key (crdt.list/ranked (queue state)))
    :plays (:plays state)})
 
 (defn- tombstones
   "The tombstones of `state` in the collections that compaction drops from."
   [state]
-  (filter :removed? (mapcat (comp vals state) [:notes :queue])))
+  (filter :removed? (mapcat (comp vals state) [:notes :cards :queue])))
 
 (defspec devices-that-sync-converge 100
   (prop/for-all [steps schedule]

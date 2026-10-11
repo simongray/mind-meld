@@ -134,6 +134,49 @@ Other functions cover imports and the rest of a sync:
 - To check a state from another device before you merge it,
   `crdt/problem` describes what in it would break the merge.
 
+Fields that change apart
+------------------------
+
+An entry is one register, so where two devices changed the same entry,
+one change is lost, even when they changed different fields, e.g. the
+title of a note on the phone and its text on the laptop. For such
+entries, write with `crdt/write-fields`, which stamps each field that
+changes:
+
+```clojure
+(def note
+  (crdt/write-fields {:device "phone"}
+                     [:notes "milk"]
+                     (constantly {:title "Milk" :text "2 litres"})
+                     #inst "2026-10-09T09:00:00Z"))
+
+(def phone
+  (crdt/write-fields note
+                     [:notes "milk"]
+                     #(assoc % :title "Oat milk")
+                     #inst "2026-10-09T10:00:00Z"))
+
+(def laptop
+  (crdt/write-fields (assoc note :device "laptop")
+                     [:notes "milk"]
+                     #(assoc % :text "3 litres")
+                     #inst "2026-10-09T10:30:00Z"))
+
+(crdt/fields (get-in (crdt/merge schema phone laptop) [:notes "milk"]))
+;; => {:title "Oat milk" :text "3 litres"}
+```
+
+The entry keeps the stamp of each field under `:stamps`, and
+`crdt/fields` gives the fields alone. Once written field by field, an
+entry stays so, whether `crdt/write` or `crdt/write-fields` writes it
+next.
+
+A removal is still of the whole entry, and the later of a removal and an
+edit wins. A removal ends every field, so an edit after it, on a device
+that hadn't seen it, brings back only what was written after the
+removal. Every device needs a version of mind-meld that knows these
+entries, from 0.2.0, since an older one merges them whole.
+
 Ordered lists
 -------------
 

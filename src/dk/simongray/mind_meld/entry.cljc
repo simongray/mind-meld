@@ -99,6 +99,133 @@
     (pos? (compare (tie-key a) (tie-key b))) a
     :else                                    b))
 
+(def bookkeeping
+  "The keys of an entry that aren't its fields."
+  #{:updated-at :device :removed? :stamps :cleared})
+
+(defn field-wise?
+  "Whether `e` is an entry whose fields each have a stamp of their own."
+  [e]
+  (contains? e :stamps))
+
+(defn fields
+  "The fields of the entry `e`, without its stamps and its removal."
+  [e]
+  (apply dissoc e bookkeeping))
+
+(defn- order-key
+  "What orders the stamps, maps of :updated-at and :device: the instant,
+  and then the device."
+  [{:keys [updated-at device]}]
+  [(if updated-at (inst-ms updated-at) 0) (str device)])
+
+(defn- after?
+  "Whether the stamp `s` comes after the stamp `t`, which can be nil."
+  [s t]
+  (or (nil? t)
+      (pos? (compare (order-key s) (order-key t)))))
+
+(defn- later-stamp
+  "The later of the stamps `s` and `t`, either of which can be nil."
+  [s t]
+  (if (after? s t) s t))
+
+(defn cleared
+  "The stamp of the last removal of the entry `e`, a map of :updated-at and
+  :device, or nil: its :cleared, or else its own stamp when it's a
+  tombstone that isn't field-wise."
+  [e]
+  (or (:cleared e)
+      (when (:removed? e)
+        (select-keys e [:updated-at :device]))))
+
+(defn field-stamps
+  "The stamp of each field of the entry `e` that came after its last
+  removal, a map of :updated-at and :device: the stamp under :stamps, or
+  else that of the entry, e.g. for each field of an entry that isn't
+  field-wise."
+  [e]
+  (let [own (select-keys e [:updated-at :device])
+        c   (cleared e)]
+    (into {}
+          (filter #(after? (val %) c))
+          (into (zipmap (keys (fields e)) (repeat own)) (:stamps e)))))
+
+;; A removal ends every field, and the entry keeps its stamp as :cleared,
+;; so that a field written before it never comes back: an edit after it, on
+;; a device that hadn't seen it, brings back only what was written after the
+;; removal, whether the tombstone is still there or compaction dropped it.
+;; Riak's map resets a removed field in the same way.
+(defn stamp-fields
+  "The entry `e` with the fields of the map `new` and its removal, stamped
+  as written at `at` by `device`: each field whose value changed or that
+  went gets that stamp, and the rest keep their own. When `new` is
+  removed, every field goes."
+  [e new at device]
+  (let [stamp    {:updated-at at :device device}
+        removed? (:removed? new)
+        old      (fields e)
+        now      (if removed? {} (fields new))
+        changed  (remove #(= (find old %) (find now %))
+                         (into (set (keys old)) (keys now)))]
+    (cond-> (assoc now
+                   :updated-at at
+                   :device     device
+                   :stamps     (if removed?
+                                 {}
+                                 (into (field-stamps e)
+                                       (map #(vector % stamp))
+                                       changed)))
+      removed?                         (assoc :removed? true :cleared stamp)
+      (and (not removed?) (cleared e)) (assoc :cleared (cleared e)))))
+
+;; The fields of a field-wise entry are each an LWW-Register (Shapiro et al.
+;; 2011, section 3.2.1), as the values of Riak's and Automerge's maps are.
+;; Deviation: those keep an update that's concurrent with a removal, which
+;; they know from causality. Without causality, the removal is a register of
+;; its own, which every write sets, so the later of an edit and a removal
+;; wins, as for the entries of a collection.
+(defn- field
+  "The field `k` of the entry `e`, whose stamp is `s`, as a stamped
+  register, with its :value unless it went, or nil without a stamp."
+  [e s k]
+  (when s
+    (cond-> s
+      (contains? e k) (assoc :value (get e k)))))
+
+(defn- presence-key
+  "What orders the removals of two entries: the stamp, the device, and a
+  removal before a write at the same stamp by the same device."
+  [e]
+  [(stamp-ms e) (str (:device e)) (boolean (:removed? e))])
+
+(defn join-fields
+  "The merge of the entries `a` and `b`, of which at least one is
+  field-wise: each field is the later of its two unless the later removal
+  of the two ended it, and the entry is removed when the later of the two
+  entries is."
+  [a b]
+  (let [c      (later-stamp (cleared a) (cleared b))
+        sa     (field-stamps a)
+        sb     (field-stamps b)
+        picked (keep (fn [k]
+                       (let [f (later (field a (get sa k) k)
+                                      (field b (get sb k) k))]
+                         (when (after? f c) [k f])))
+                     (into (set (keys sa)) (keys sb)))
+        top    (if (pos? (compare (presence-key a) (presence-key b))) a b)]
+    (cond-> (into {:updated-at (:updated-at top)
+                   :device     (:device top)
+                   :stamps     (into {}
+                                     (map (fn [[k s]]
+                                            [k (select-keys s [:updated-at
+                                                               :device])]))
+                                     picked)}
+                  (keep (fn [[k s]] (when (contains? s :value) [k (:value s)])))
+                  picked)
+      (:removed? top) (assoc :removed? true)
+      c               (assoc :cleared c))))
+
 ;; A G-Counter (Shapiro et al. 2011, section 3.1.2) with an entry per device,
 ;; ordered as a lexicographic product of count and stamp (Almeida 2024,
 ;; figure 10). Like any G-Counter, it needs one writer per device id.

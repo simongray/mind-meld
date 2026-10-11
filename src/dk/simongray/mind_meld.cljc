@@ -4,7 +4,8 @@
   A state is a map of collections, each a map of entries, maybe nested by
   more keys, with the :device that the state belongs to and its :clock. An
   entry is stamped with :updated-at and :device, and a removed entry is a
-  tombstone with :removed?.
+  tombstone with :removed?. A field-wise entry, which write-fields writes,
+  also has a stamp for each of its fields under :stamps.
 
   A schema maps the key of each collection to its options:
 
@@ -52,6 +53,12 @@
   [e]
   (entry/stamp-ms e))
 
+(defn fields
+  "The fields of the entry `e`, as an app reads them: without its stamps,
+  the stamps of its fields and its removal."
+  [e]
+  (entry/fields e))
+
 ;; Each entry is an LWW-Register, so a collection of them is an
 ;; LWW-element-Set (Shapiro et al. 2011, sections 3.2.1 and 3.3.3), and a
 ;; removal is a flag on the entry, as in RFC 677.
@@ -86,28 +93,72 @@
   (entry/->inst (cond-> (inst-ms at)
                   (:clock state) (max (inc (inst-ms (:clock state)))))))
 
-(defn write-each
+(defn- join-entries
+  "The merge of the stamped entries `a` and `b`: field by field when
+  either is field-wise, or else the later of the two."
+  [a b]
+  (cond
+    ;; most entries of two states agree
+    (= a b)
+    a
+
+    (or (entry/field-wise? a) (entry/field-wise? b))
+    (entry/join-fields a b)
+
+    :else
+    (later a b)))
+
+(defn- stamped
+  "The entry `e` replaced by the entry `new`, stamped at `at` by `device`:
+  field by field when `fields?` or `e` is field-wise, or else whole."
+  [e new at device fields?]
+  (if (or fields? (entry/field-wise? e))
+    (entry/stamp-fields e new at device)
+    (entry/stamp new at device)))
+
+(defn- write-entries
   "The `state` with each of the `writes`, pairs of a path and a function,
-  made at `at` with one stamp: the entry at the path is replaced by what
-  the function returns for it."
-  [state writes at]
+  made at `at` with one stamp, field by field when `fields?`."
+  [state writes at fields?]
   (let [foreign?  (contains? state ::author)
         device    (or (::author state) (:device state))
         at        (if foreign?
                     (entry/->inst (inst-ms at))
                     (or (::at state) (after state at)))
-        put       (if foreign? later (fn [_ new] new))
+        put       (if foreign? join-entries (fn [_ new] new))
         write-one (fn [s [path f]]
-                    (update-in s path #(put % (entry/stamp (f %) at device))))]
+                    (update-in s path #(put % (stamped % (f %) at device
+                                                        fields?))))]
     (-> (reduce write-one state writes)
         (assoc :clock (later-inst (:clock state) at)))))
+
+(defn write-each
+  "The `state` with each of the `writes`, pairs of a path and a function,
+  made at `at` with one stamp: the entry at the path is replaced by what
+  the function returns for it, field by field when it's field-wise, as
+  write-fields writes it."
+  [state writes at]
+  (write-entries state writes at false))
 
 (defn write
   "The `state` with the entry at `path` replaced by what `f` returns for
   it, or for nil when there's none. It's stamped at `at`, or just after
-  the state's clock when that's later."
+  the state's clock when that's later. An entry that write-fields wrote
+  stays field-wise."
   [state path f at]
-  (write-each state [[path f]] at))
+  (write-entries state [[path f]] at false))
+
+(defn write-fields
+  "The `state` with the entry at `path` replaced by what `f` returns for
+  it, field by field, at `at` as write stamps it: each field that changed,
+  or that went, gets the stamp, so that a merge keeps the edits of two
+  devices to different fields of one entry, e.g. the title of a note on
+  one device and its body on another. A removal is still of the whole
+  entry, by :removed?.
+
+      (write-fields state [:notes \"n1\"] #(assoc % :title \"Milk\") at)"
+  [state path f at]
+  (write-entries state [[path f]] at true))
 
 ;; The alternative is the hybrid logical clock of Kulkarni et al. 2014 in
 ;; full, with a counter in each stamp, so that no series of writes runs ahead
@@ -139,6 +190,9 @@
   - a stamped entry is a last-writer-wins register, and the later entry
     wins whole, even when it's a tombstone, but in a collection with a
     :count-key, the higher count wins
+  - a field-wise entry, which write-fields writes, merges field by field,
+    each field a register, and it's removed when the later of the two
+    entries is
   - a map merges key by key, down to the entries
   - an instant is a max register
   - any other value is that of `a`
@@ -149,7 +203,7 @@
   (let [pick-fn (fn [k]
                   (if-let [count-key (get-in schema [k :count-key])]
                     (partial entry/higher count-key)
-                    later))
+                    join-entries))
         ks      (disj (into (set (keys a)) (keys b)) :device)]
     (into {:device (:device a)}
           (map (fn [k] [k (tree/join (pick-fn k) (get a k) (get b k))]))
@@ -163,7 +217,9 @@
   - The state and its collections are maps, and the clock is an instant.
   - Besides the device and the clock, the state holds only maps, down to
     stamped entries.
-  - Each entry of a collection has a stamp, which is an instant.
+  - Each entry of a collection has a stamp, which is an instant, and so
+    has each field of a field-wise entry.
+  - No entry of a collection with a :count-key is field-wise.
   - What a device has seen is a map of instants."
   [schema state]
   (if (map? state)
