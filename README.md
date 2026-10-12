@@ -43,7 +43,7 @@ from [Clojars](https://clojars.org/dk.simongray/mind-meld) to the `:deps`
 in your `deps.edn`:
 
 ```clojure
-dk.simongray/mind-meld {:mvn/version "0.2.0"}
+dk.simongray/mind-meld {:mvn/version "0.3.0"}
 ```
 
 For changes that aren't released yet, use the SHA of the latest commit on
@@ -110,10 +110,9 @@ marked `:removed?`, so that an older copy of it can't bring it back. Say
 the laptop has synced and removes the milk note:
 
 ```clojure
-(crdt/write (crdt/merge schema laptop phone)
-            [:notes "milk"]
-            #(assoc % :removed? true)
-            #inst "2026-10-09T11:00:00Z")
+(crdt/remove (crdt/merge schema laptop phone)
+             [:notes "milk"]
+             #inst "2026-10-09T11:00:00Z")
 ```
 
 If the phone, still offline, edits the note at 10:30, the note stays
@@ -176,6 +175,61 @@ edit wins. A removal ends every field, so an edit after it, on a device
 that hadn't seen it, brings back only what was written after the
 removal. Every device needs a version of mind-meld that knows these
 entries, from 0.2.0, since an older one merges them whole.
+
+Sets and counts
+---------------
+
+A set is a collection one level deeper, with an entry for each member,
+e.g. the tags of each note under `[:tags note-id tag]`. A member is in
+the set while its entry is live, and `crdt/remove` takes it out:
+
+```clojure
+(def schema
+  {:notes {:depth 1 :compact? true}
+   :tags  {:depth 2 :compact? true}
+   :plays {:depth 2 :count-key :n}})
+
+(defn tag
+  "The `state` with the note `id` tagged `t` at `at`."
+  [state id t at]
+  (crdt/write state [:tags id t] (constantly {}) at))
+
+(def tagged
+  (-> {:device "phone"}
+      (tag "milk" "dairy" #inst "2026-10-09T09:00:00Z")
+      (tag "milk" "shopping" #inst "2026-10-09T09:00:00Z")
+      (crdt/remove [:tags "milk" "shopping"] #inst "2026-10-09T10:00:00Z")))
+
+(crdt/live-by-stamp (get-in tagged [:tags "milk"]))
+;; => ["dairy"]
+```
+
+A count can't be one entry that every device writes, since two devices
+that each add 1 to 5 would both write 6. Give each device an entry of
+its own, with the device id in the path, and a `:count-key` in the
+schema, so that a merge keeps the higher count of each device. Then
+`crdt/sum` adds them up:
+
+```clojure
+(defn play
+  "The `state` after its device played `song` at `at`."
+  [state song at]
+  (crdt/write state
+              [:plays song (:device state)]
+              #(update % :n (fnil inc 0))
+              at))
+
+(def phone
+  (-> {:device "phone"}
+      (play "intro" #inst "2026-10-09T09:00:00Z")
+      (play "intro" #inst "2026-10-09T09:10:00Z")))
+
+(def laptop
+  (play {:device "laptop"} "intro" #inst "2026-10-09T09:05:00Z"))
+
+(crdt/sum schema (crdt/merge schema phone laptop) [:plays "intro"])
+;; => 3
+```
 
 Ordered lists
 -------------

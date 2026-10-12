@@ -47,7 +47,20 @@
     (testing "a live entry and a tombstone"
       (is (crdt/live? (get-in s [:notes "n1"])))
       (is (not (crdt/live? (get-in (crdt/write s [:notes "n1"] #(assoc % :removed? true) t2) [:notes "n1"]))))
-      (is (not (crdt/live? nil))))))
+      (is (not (crdt/live? nil))))
+    (testing "a removal"
+      (let [removed (crdt/remove s [:notes "n1"] t2)]
+        (is (= {:text "x" :removed? true :updated-at t2 :device "phone"} (get-in removed [:notes "n1"]))
+            "a tombstone that keeps its fields")
+        (is (= removed (crdt/write s [:notes "n1"] #(assoc % :removed? true) t2)))
+        (is (= "x" (get-in (crdt/merge schema removed s) [:notes "n1" :text])))
+        (is (not (crdt/live? (get-in (crdt/merge schema s removed) [:notes "n1"])))
+            "which an older copy can't bring back"))
+      (let [fields (crdt/write-fields s [:notes "n2"] (constantly {:title "a" :text "b"}) t1)]
+        (is (= {} (crdt/fields (get-in (crdt/remove fields [:notes "n2"] t2) [:notes "n2"])))
+            "and a field-wise one that ends every field"))
+      (is (not (crdt/live? (get-in (crdt/remove {:device "phone"} [:notes "n9"] t1) [:notes "n9"])))
+          "or one of an entry that isn't there yet"))))
 
 (deftest merging-by-the-schema
   (let [phone  (-> {:device "phone"}
@@ -62,6 +75,19 @@
     (is (= 5 (get-in (crdt/merge {} phone laptop) [:plays "song" "phone" :n])) "without a :count-key, the later entry")
     (is (= "phone" (:device merged)))
     (is (= (dissoc merged :device) (dissoc (crdt/merge schema laptop phone) :device)))
+    (testing "the sum of a count with an entry for each device"
+      (let [both (crdt/merge schema
+                             (crdt/write merged [:plays "song" "laptop"] (constantly {:n 3}) t3)
+                             (crdt/write laptop [:plays "song" "tablet"] (constantly {:n 1}) t3))]
+        (is (= 13 (crdt/sum schema both [:plays "song"])))
+        (is (= 0 (crdt/sum schema both [:plays]))
+            "of the entries right under the path, not deeper")
+        (is (= 12 (crdt/sum schema (crdt/remove both [:plays "song" "tablet"] t3) [:plays "song"]))
+            "without a removed one")
+        (is (= 0 (crdt/sum schema both [:plays "other"])))
+        (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo)
+                     (crdt/sum schema both [:notes]))
+            "and an error for a collection without a :count-key")))
     (testing "two entries of one device at one instant: the same winner on every platform"
       (let [entry (fn [v] {:device "x" :notes {"n1" {:v v :updated-at t0 :device "x"}}})
             v     #(get-in (crdt/merge schema %1 %2) [:notes "n1" :v])]

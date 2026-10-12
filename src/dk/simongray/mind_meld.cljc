@@ -33,7 +33,7 @@
   - Almeida, Shoker and Baquero, Delta State Replicated Data Types,
     Journal of Parallel and Distributed Computing 111, 2018,
     https://arxiv.org/abs/1603.01529"
-  (:refer-clojure :exclude [merge])
+  (:refer-clojure :exclude [merge remove])
   (:require [dk.simongray.mind-meld.check :as check]
             [dk.simongray.mind-meld.entry :as entry]
             [dk.simongray.mind-meld.registry :as registry]
@@ -72,7 +72,7 @@
   first."
   [entries]
   (->> entries
-       (remove (comp :removed? val))
+       (clojure.core/remove (comp :removed? val))
        (sort-by (comp stamp-ms val) >)
        (mapv key)))
 
@@ -160,6 +160,14 @@
   [state path f at]
   (write-entries state [[path f]] at true))
 
+(defn remove
+  "The `state` with the entry at `path` removed at `at`, as write stamps it:
+  a tombstone, marked :removed?, so that an older copy of the entry can't
+  bring it back. A tombstone of an entry that isn't field-wise keeps its
+  fields."
+  [state path at]
+  (write state path #(assoc % :removed? true) at))
+
 ;; The alternative is the hybrid logical clock of Kulkarni et al. 2014 in
 ;; full, with a counter in each stamp, so that no series of writes runs ahead
 ;; of the time. That changes the format of every stamp, and its practical
@@ -208,6 +216,24 @@
     (into {:device (:device a)}
           (map (fn [k] [k (tree/join (pick-fn k) (get a k) (get b k))]))
           ks)))
+
+;; A G-Counter is the sum of the counts of its devices (Shapiro et al. 2011,
+;; section 3.1.2)
+(defn sum
+  "The sum of the counts of the live entries right under `path` in `state`,
+  under the :count-key of their collection in `schema`, e.g. of a count
+  with an entry for each device."
+  [schema state path]
+  (let [count-key (get-in schema [(first path) :count-key])]
+    (when-not count-key
+      (throw (ex-info "The collection has no :count-key"
+                      {:collection (first path)})))
+    (transduce (comp (filter live?)
+                     (map count-key)
+                     (filter number?))
+               +
+               0
+               (vals (get-in state path)))))
 
 (defn problem
   "A description of what in `state` breaks the rules below, given the
