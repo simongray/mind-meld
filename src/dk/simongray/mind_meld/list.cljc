@@ -53,8 +53,12 @@
 (defn rank-between
   "A rank between the entries of the ids `before-id` and `after-id` of the
   ordered `entries`, either of which can be nil for an end, and after any
-  entries that share the rank of `before-id`."
+  entries that share the rank of `before-id`. It throws for an id that
+  the entries lack, as rank/between throws for a rank that isn't one."
   [entries before-id after-id]
+  (doseq [id [before-id after-id]]
+    (when (and (some? id) (not (contains? entries id)))
+      (throw (ex-info (str "No entry has the id " (pr-str id)) {:id id}))))
   (let [a (some->> before-id (get entries) :rank)
         b (when after-id
             (->> (drop-while #(not= after-id (key %)) (ranked entries))

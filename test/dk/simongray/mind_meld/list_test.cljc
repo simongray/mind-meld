@@ -25,7 +25,14 @@
         (is (= ["d" "a" "b" "c"] (order (crdt/merge {} removed (assoc moved :device "laptop")))))))
     (testing "an addition after a move puts the entry where the addition says"
       (let [again (crdt/write moved [:queue "e"] (constantly {:rank "z"}) t3)]
-        (is (= ["d" "a" "b" "c" "e"] (order again)))))))
+        (is (= ["d" "a" "b" "c" "e"] (order again)))))
+    (testing "a rank between ids that the entries lack throws, rather than go first"
+      (doseq [[before after] [["x" nil] [nil "x"] ["a" "x"]]]
+        (is (= {:id "x"}
+               (try (crdt.list/rank-between (view both) before after) nil
+                    (catch #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e
+                      (ex-data e))))
+            [before after])))))
 
 (deftest the-ranks-by-the-schema
   (let [schema {:queue     {:depth 1 :ranked? true}

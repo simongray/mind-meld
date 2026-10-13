@@ -116,6 +116,17 @@
     (entry/stamp-fields e new at device)
     (entry/stamp new at device)))
 
+(defn- written
+  "What `f` gives for the entry `e` at `path`: a map, or nil for none. It
+  throws for anything else, e.g. a string from (constantly \"dark\")."
+  [f e path]
+  (let [new (f e)]
+    (when-not (or (nil? new) (map? new))
+      (throw (ex-info (str "A write to " (pr-str path)
+                           " gave something other than a map or nil")
+                      {:path path :value new})))
+    new))
+
 (defn- write-entries
   "The `state` with each of the `writes`, pairs of a path and a function,
   made at `at` with one stamp, field by field when `fields?`."
@@ -127,8 +138,8 @@
                     (or (::at state) (after state at)))
         put       (if foreign? join-entries (fn [_ new] new))
         write-one (fn [s [path f]]
-                    (update-in s path #(put % (stamped % (f %) at device
-                                                        fields?))))]
+                    (update-in s path #(put % (stamped % (written f % path)
+                                                        at device fields?))))]
     (-> (reduce write-one state writes)
         (assoc :clock (later-inst (:clock state) at)))))
 

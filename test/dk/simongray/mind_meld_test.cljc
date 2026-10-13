@@ -60,7 +60,16 @@
         (is (= {} (crdt/fields (get-in (crdt/remove fields [:notes "n2"] t2) [:notes "n2"])))
             "and a field-wise one that ends every field"))
       (is (not (crdt/live? (get-in (crdt/remove {:device "phone"} [:notes "n9"] t1) [:notes "n9"])))
-          "or one of an entry that isn't there yet"))))
+          "or one of an entry that isn't there yet"))
+    (testing "an entry is a map, so a write that gives anything else throws"
+      (doseq [write [crdt/write crdt/write-fields]]
+        (is (= {:path [:notes "n1"] :value "dark"}
+               (try (write s [:notes "n1"] (constantly "dark") t2) nil
+                    (catch #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) e
+                      (ex-data e))))))
+      (is (= {:updated-at t2 :device "phone"}
+             (get-in (crdt/write s [:notes "n3"] (constantly nil) t2) [:notes "n3"]))
+          "while nil is an entry of no fields"))))
 
 (deftest merging-by-the-schema
   (let [phone  (-> {:device "phone"}
