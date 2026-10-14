@@ -38,25 +38,20 @@ results on each.
 Getting started
 ---------------
 
-It requires Clojure 1.11+ and Java 11+. For the latest release, add it
-from [Clojars](https://clojars.org/dk.simongray/mind-meld) to the `:deps`
-in your `deps.edn`:
+It requires Clojure 1.11+ and Java 11+. Add it from
+[Clojars](https://clojars.org/dk.simongray/mind-meld) to the `:deps` in
+your `deps.edn`:
 
 ```clojure
 dk.simongray/mind-meld {:mvn/version "0.4.0"}
 ```
 
-For changes that aren't released yet, use the SHA of the latest commit on
-`master` instead:
+For unreleased changes, depend on the latest commit on `master` instead.
+In shadow-cljs, a Git dependency only works through `deps.edn`, so set
+`:deps true` in your `shadow-cljs.edn` too.
 
-```clojure
-dk.simongray/mind-meld
-{:git/url "https://github.com/simongray/mind-meld"
- :git/sha "…"}
-```
-
-For ClojureScript, shadow-cljs only reads Git dependencies from
-`deps.edn`, so also set `:deps true` in your `shadow-cljs.edn`.
+Writing and merging
+-------------------
 
 A state is a map with the id of its device, and a schema names its
 collections. Each device writes its changes with `crdt/write` and the
@@ -329,16 +324,6 @@ Principles
   of those devices can bring back what the others forgot.
 - **One codebase.** The library is written in `.cljc`, with no
   dependencies but Clojure.
-
-Versions
---------
-
-Until 1.0, a release that changes the API gets a new minor version, e.g.
-from 0.4.2 to 0.5.0, and one that only fixes gets a new patch version,
-e.g. from 0.4.2 to 0.4.3. A function that's renamed or removed goes
-without a deprecated alias, and the commit of each release says what
-changed. The tests run in CI on Java 11 and 25, in Node and in a
-headless Chrome.
 
 Development
 -----------
