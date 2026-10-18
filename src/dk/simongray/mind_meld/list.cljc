@@ -103,11 +103,12 @@
 
   The `entries` should have their moves applied, so that the ids go after
   an entry that was moved to the end. An id that's already there stays
-  where it is. The ranks are in a block of the state's device, so that ids
-  that another device appends at the same time don't mix with them."
+  where it is. The ranks are in a block of the state's author, its device
+  or its replica, so that ids that another appends at the same time don't
+  mix with them."
   [state path entries ids]
   (let [fresh (remove #(crdt/live? (get entries %)) (distinct ids))
-        ranks (rank/after (last-rank entries) (count fresh) (:device state))]
+        ranks (rank/after (last-rank entries) (count fresh) (crdt/author state))]
     (map (fn [id rank]
            [(conj path id) (constantly {:rank rank :removed? false})])
          fresh

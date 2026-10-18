@@ -36,6 +36,33 @@
     :else
     nil))
 
+(defn entries
+  "The stamped entries in the map `m`, however deep, as pairs of the path
+  to each, below `path`, and the entry."
+  ([m]
+   (entries [] m))
+  ([path m]
+   (mapcat (fn [[k v]]
+             (cond
+               (entry/stamped? v) [[(conj path k) v]]
+               (map? v)           (entries (conj path k) v)
+               :else              []))
+           m)))
+
+(defn update-entries
+  "The map `m` with each stamped entry in it, however deep, replaced by `f`
+  of the path to it, below `path`, and the entry."
+  ([m f]
+   (update-entries [] m f))
+  ([path m f]
+   (reduce-kv (fn [acc k v]
+                (cond
+                  (entry/stamped? v) (assoc acc k (f (conj path k) v))
+                  (map? v)           (assoc acc k (update-entries (conj path k) v f))
+                  :else              acc))
+              m
+              m)))
+
 (defn remove-entries
   "The map `m` without the stamped entries that `pred` holds for, nor the
   maps that they leave empty."

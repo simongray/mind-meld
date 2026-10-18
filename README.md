@@ -201,7 +201,7 @@ the set while its entry is live, and `crdt/remove` takes it out:
 
 A count can't be one entry that every device writes, since two devices
 that each add 1 to 5 would both write 6. Give each device an entry of
-its own, with the device id in the path, and a `:count-key` in the
+its own, with `crdt/author` in the path, and a `:count-key` in the
 schema, so that a merge keeps the higher count of each device. Then
 `crdt/sum` adds them up:
 
@@ -210,7 +210,7 @@ schema, so that a merge keeps the higher count of each device. Then
   "The `state` after its device played `song` at `at`."
   [state song at]
   (crdt/write state
-              [:plays song (:device state)]
+              [:plays song (crdt/author state)]
               #(update % :n (fnil inc 0))
               at))
 
@@ -301,6 +301,43 @@ registry of the devices, which records what each has merged:
 - A device that stops syncing holds compaction back. You can find such
   devices with `crdt/lagging`, and retire one for good with
   `crdt/retire`.
+
+Replicas of a device
+--------------------
+
+Some devices write one state in several places at once, e.g. the tabs and
+workers of a web app, which share the browser's storage. They can't share
+one id, since one of them would lose the counts of the other, and the
+registry assumes that an author's entries arrive in the order of their
+stamps. Give each of them a replica of its own with `crdt/with-replica`:
+
+```clojure
+(def tab
+  (crdt/with-replica {:device "phone"} "1"))
+
+(crdt/author tab)
+;; => "phone/1"
+```
+
+The replica stamps what it writes, and a count with `crdt/author` in its
+path gets an entry for each replica. The registry counts what a replica
+writes as its device's, so the other devices still see one device. Each
+replica is an author that they keep track of, though, so reuse the names
+of replicas that are gone rather than make a new one for each tab.
+
+The replicas share the device's storage, and each catches up with what
+the others saved there with `crdt/rebase`, never `crdt/merge`:
+
+```clojure
+(crdt/rebase schema tab saved stored)
+```
+
+Here `saved` is the state that the tab last read from the storage or
+wrote there, and `stored` the state there now. Since the registry counts
+every replica as having merged what its device holds, a whole merge
+would bring back what another replica compacted meanwhile. A rebase
+takes only what the tab changed since, and moves those changes after the
+clock of `stored`, as if made when they're saved.
 
 Principles
 ----------

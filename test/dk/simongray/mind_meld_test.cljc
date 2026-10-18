@@ -165,6 +165,66 @@
     (is (= phone (crdt/compact schema phone t3)) "a young tombstone stays")
     (is (= {} (crdt/lagging phone)))))
 
+(deftest replicas-of-a-device
+  (let [far    #inst "2026-02-01T03:00:00Z"
+        phone  (crdt/identify {:device "phone"} {:name "Phone"} t0)
+        play   (fn [s at]
+                 (crdt/write s [:plays "song" (crdt/author s)] #(update % :n (fnil inc 0)) at))
+        tab1   (-> (crdt/with-replica phone "1")
+                   (play t1)
+                   (crdt/remove [:notes "n1"] t1))
+        tab2   (play (crdt/with-replica phone "2") t1)
+        both   (crdt/merge schema tab1 tab2)]
+    (is (= "phone/1" (crdt/author tab1) (get-in tab1 [:notes "n1" :device])) "a replica stamps what it writes")
+    (is (= "phone" (crdt/author phone)))
+    (is (= 2 (crdt/sum schema both [:plays "song"])) "a count of each replica, so that neither play is lost")
+    (is (= "phone/1" (:replica both)) "a merge keeps the replica of the state it merges into")
+    (is (= "phone" (:device both)))
+    (is (= {:device "phone"} (crdt/with-replica {:device "phone" :replica "phone/1"} nil)))
+    (is (thrown? #?(:clj clojure.lang.ExceptionInfo :cljs ExceptionInfo) (crdt/with-replica phone "a/b")))
+    (testing "the device of an author"
+      (is (= "phone" (crdt/device-of both "phone/1") (crdt/device-of both "phone")))
+      (is (= "service:x/1" (crdt/device-of both "service:x/1")) "an author outside the registry is its own"))
+    (testing "the registry counts what a replica writes as its device's"
+      (let [removed (get-in tab1 [:notes "n1" :updated-at])
+            laptop  (-> (crdt/identify {:device "laptop"} {:name "Laptop"} t0)
+                        (as-> s (crdt/merge schema s both))
+                        (crdt/write [:notes "l1"] (constantly {}) t2)
+                        (crdt/acknowledge [both] t2))
+            phone   (crdt/acknowledge (crdt/merge schema both laptop) [laptop] t3)]
+        (is (= {"laptop" t2} (get-in phone [:devices "phone" :seen])) "a device's own replicas aren't news to it")
+        (is (= removed (get-in laptop [:devices "laptop" :seen "phone/1"])))
+        (is (= {} (crdt/lagging phone)))
+        (is (nil? (get-in (crdt/compact schema phone far) [:notes "n1"]))
+            "a replica's tombstone goes once every other device has seen it")
+        (is (= {"laptop" removed} (crdt/lagging (play phone t3)))
+            "and the laptop lags until it has merged what the replica writes next")))
+    (testing "a replica of another device"
+      (is (nil? (crdt/problem schema both)))
+      (is (string? (crdt/problem schema (assoc both :replica "laptop/1"))))
+      (is (string? (crdt/problem schema (assoc both :replica 1)))))))
+
+(deftest rebasing-a-replica
+  (let [store  (crdt/identify {:device "phone"} {} t0)
+        tab1   (crdt/with-replica store "1")
+        tab2   (crdt/with-replica store "2")
+        ;; tab 1 notes n1 before tab 2 removes it and saves, but saves after
+        noted  (crdt/write tab1 [:notes "n1"] (constantly {:text "x"}) t1)
+        saved  (crdt/remove tab2 [:notes "n1"] t2)
+        stored (crdt/rebase schema saved store store)
+        laptop (crdt/write {:device "laptop"} [:notes "l1"] (constantly {}) t0)
+        merged (crdt/merge schema stored laptop)
+        caught (crdt/rebase schema noted store merged)]
+    (is (= saved stored) "nothing to catch up with when the store holds what the replica last read")
+    (is (= "phone/1" (:replica caught)))
+    (is (= "x" (get-in caught [:notes "n1" :text])))
+    (is (< (inst-ms t2) (crdt/stamp-ms (get-in caught [:notes "n1"])))
+        "a write that the store's clock passed comes after it, as if made when saved")
+    (is (= (get-in laptop [:notes "l1"]) (get-in caught [:notes "l1"]))
+        "what another device wrote keeps its stamp")
+    (is (not (contains? (:notes (crdt/rebase schema tab1 store (dissoc merged :notes))) "n1"))
+        "a whole merge would bring back what another replica compacted, a rebase only what it changed")))
+
 (deftest field-wise-entries
   (let [base   (crdt/write-fields {:device "phone"} [:notes "n1"] (constantly {:title "Milk" :body "2 l"}) t0)
         phone  (crdt/write-fields base [:notes "n1"] #(assoc % :title "Oat milk") t1)
