@@ -1,6 +1,10 @@
 (ns ^:no-doc dk.simongray.mind-meld.registry
   "The registry of devices in a state, which records what each device has
-  merged, and the replicas that write for a device."
+  merged.
+
+  In version 0.5.0, the tabs of a browser wrote as replicas of its device,
+  with ids such as \"phone/1\", and the states still hold what they wrote.
+  The registry counts those entries as their device's."
   (:require [clojure.string :as str]
             [dk.simongray.mind-meld.entry :as entry]))
 
@@ -11,7 +15,7 @@
    :retired {:depth 1}})
 
 (defn replica-device
-  "The device whose replica `author` is, by an id of the device's id, a
+  "The device whose replica `author` was, by an id of the device's id, a
   slash and the replica's name, or nil when it has no slash."
   [author]
   (let [s (str author)]
@@ -19,14 +23,14 @@
       (subs s 0 i))))
 
 (defn own?
-  "Whether `author` is the `device` itself or one of its replicas."
+  "Whether `author` is the `device` itself or was one of its replicas."
   [device author]
   (or (= device author)
       (= (str device) (replica-device author))))
 
 (defn device-of
   "The device that `author` writes for in `state`: the author itself when
-  it's a device in the registry, or else the device whose replica it is,
+  it's a device in the registry, or else the device whose replica it was,
   when that's in the registry or the state's own. Any other author is its
   own."
   [state author]
@@ -61,9 +65,9 @@
 ;; Stability (Shapiro et al. 2011, section 4.1, after Wuu and Bernstein,
 ;; PODC 1984). Deviation: :seen keeps the latest stamp of each author, not a
 ;; vector clock, which holds only while an author's entries arrive in the
-;; order of their stamps. That's true of the devices in the registry and of
-;; their replicas, each of which writes in one place at a time, but not of
-;; the authors of as-device, so their tombstones stay.
+;; order of their stamps. That's true of the devices in the registry, and
+;; was of the replicas of version 0.5.0, each of which wrote in one place at
+;; a time, but not of the authors of as-device, so their tombstones stay.
 (defn seen-by-all?
   "Whether every one of the `devices` of `state` that aren't retired,
   except the device that wrote the entry `e`, has merged it, by the

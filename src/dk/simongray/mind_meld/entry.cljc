@@ -226,29 +226,6 @@
       (:removed? top) (assoc :removed? true)
       c               (assoc :cleared c))))
 
-(defn stamps
-  "The stamps in the entry `e`, each a map of :updated-at and :device: its
-  own, those of its fields and that of its last removal."
-  [e]
-  (cond-> [(select-keys e [:updated-at :device])]
-    (:stamps e)  (into (vals (:stamps e)))
-    (:cleared e) (conj (:cleared e))))
-
-(defn- shift
-  "The stamp `s` moved `ms` milliseconds later when `pred` holds for it."
-  [s pred ms]
-  (if (pred s)
-    (update s :updated-at #(->inst (+ (inst-ms %) ms)))
-    s))
-
-(defn shifted
-  "The entry `e` with each of its stamps that `pred` holds for moved `ms`
-  milliseconds later."
-  [e pred ms]
-  (cond-> (into e (shift (select-keys e [:updated-at :device]) pred ms))
-    (:stamps e)  (update :stamps update-vals #(shift % pred ms))
-    (:cleared e) (update :cleared shift pred ms)))
-
 ;; A G-Counter (Shapiro et al. 2011, section 3.1.2) with an entry per device,
 ;; ordered as a lexicographic product of count and stamp (Almeida 2024,
 ;; figure 10). Like any G-Counter, it needs one writer per device id.

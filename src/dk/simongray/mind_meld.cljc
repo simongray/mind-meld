@@ -2,12 +2,10 @@
   "A CRDT of plain maps, which devices merge in any order without conflict.
 
   A state is a map of collections, each a map of entries, maybe nested by
-  more keys, with the :device that the state belongs to and its :clock,
-  and the :replica that writes it, if any. An entry is stamped with
-  :updated-at and the :device that wrote it, the replica's id for a
-  replica, and a removed entry is a tombstone with :removed?. A field-wise
-  entry, which write-fields writes, also has a stamp for each of its
-  fields under :stamps.
+  more keys, with the :device that the state belongs to and its :clock. An
+  entry is stamped with :updated-at and :device, and a removed entry is a
+  tombstone with :removed?. A field-wise entry, which write-fields writes,
+  also has a stamp for each of its fields under :stamps.
 
   A schema maps the key of each collection to its options:
 
@@ -42,9 +40,8 @@
             [dk.simongray.mind-meld.tree :as tree]))
 
 (def ^:no-doc header
-  "The keys of a state that hold no entries: its device, its clock and its
-  replica."
-  #{:device :clock :replica})
+  "The keys of a state that hold no entries: its device and its clock."
+  #{:device :clock})
 
 (defn later-inst
   "The later of the instants `a` and `b`, either of which can be nil."
@@ -130,18 +127,12 @@
                       {:path path :value new})))
     new))
 
-(defn author
-  "The id that stamps the writes to `state`: that of its replica, or else
-  that of its device, e.g. for the path of a count of its own."
-  [state]
-  (or (:replica state) (:device state)))
-
 (defn- write-entries
   "The `state` with each of the `writes`, pairs of a path and a function,
   made at `at` with one stamp, field by field when `fields?`."
   [state writes at fields?]
   (let [foreign?  (contains? state ::author)
-        device    (or (::author state) (author state))
+        device    (or (::author state) (:device state))
         at        (if foreign?
                     (entry/->inst (inst-ms at))
                     (or (::at state) (after state at)))
@@ -211,38 +202,14 @@
   [state device f]
   (dissoc (f (assoc state ::author device)) ::author))
 
-;; Every writer needs an id of its own: a G-Counter has an entry for each
-;; (Shapiro et al. 2011, section 3.1.2), and the registry assumes that an
-;; author's entries arrive in the order of their stamps. Two contexts of one
-;; device that share its storage, e.g. two tabs, break both with one id.
-(defn with-replica
-  "The `state`, written from now on by the replica `name` of its device, or
-  by the device itself when `name` is nil.
-
-  Give each context that writes the device's state at the same time a
-  name of its own, e.g. each tab and worker of a web app in one browser,
-  and reuse the names once those contexts are gone, since each one is an
-  author that the other devices keep track of. The replica's id is the
-  device's id, a slash and the name, e.g. \"phone/1\", and the registry
-  counts what it writes as the device's. A merge keeps the replica of the
-  state it merges into.
-
-  A replica catches up with what the others saved with rebase, not merge,
-  so that it never brings back what one of them compacted."
-  [state name]
-  (if (nil? name)
-    (dissoc state :replica)
-    (let [s (str name)]
-      (when (or (= "" s) (re-find #"/" s))
-        (throw (ex-info "The name of a replica is a string without a slash"
-                        {:name name})))
-      (assoc state :replica (str (:device state) "/" s)))))
-
 (defn device-of
   "The device that `author` writes for in `state`: the author itself, or
-  the device whose replica it is, when that's in the registry or the
-  state's own. An author outside the registry, e.g. one of as-device, is
-  its own."
+  the device whose replica it was, e.g. \"phone\" for \"phone/1\", when
+  that's in the registry or the state's own.
+
+  In version 0.5.0, the tabs of a browser wrote as replicas of its device,
+  and the entries they wrote keep their ids. An author outside the
+  registry, e.g. one of as-device, is its own."
   [state author]
   (registry/device-of state author))
 
@@ -267,9 +234,8 @@
                   (if-let [count-key (get-in schema [k :count-key])]
                     (partial entry/higher count-key)
                     join-entries))
-        ks      (disj (into (set (keys a)) (keys b)) :device :replica)]
-    (into (cond-> {:device (:device a)}
-            (contains? a :replica) (assoc :replica (:replica a)))
+        ks      (disj (into (set (keys a)) (keys b)) :device)]
+    (into {:device (:device a)}
           (map (fn [k] [k (tree/join (pick-fn k) (get a k) (get b k))]))
           ks)))
 
@@ -302,14 +268,12 @@
   - Each entry of a collection has a stamp, which is an instant, and so
     has each field of a field-wise entry.
   - No entry of a collection with a :count-key is field-wise.
-  - What a device has seen is a map of instants.
-  - The replica, if any, is one of the state's device."
+  - What a device has seen is a map of instants."
   [schema state]
   (if (map? state)
     (let [schema (clojure.core/merge schema registry/schema)]
       (some #(% state)
             [check/clock-problem
-             check/replica-problem
              #(check/collection-problem schema %)
              #(check/value-problem [] (apply dissoc % header))
              #(check/stamp-problem [] %)
@@ -324,8 +288,8 @@
   - The schema is a map of the key of each collection to its options.
   - The options are a map with a :depth, a whole number from 0.
   - The only options are :depth, :compact?, :count-key and :ranked?.
-  - No collection is under :device, :clock, :replica, :devices or
-    :retired, which the state holds itself."
+  - No collection is under :device, :clock, :devices or :retired, which
+    the state holds itself."
   [schema]
   (check/schema-problem schema (into header (keys registry/schema))))
 
@@ -338,58 +302,7 @@
   however early its stamp."
   [state previous]
   (let [entries (apply dissoc state header)]
-    (into (select-keys state [:device :clock])
-          (tree/changed-part entries previous))))
-
-(defn- published
-  "The changes `delta` since the state `base`, with every stamp that the
-  author `me` made since moved later by one amount, so that they keep
-  their order, when `clock` has passed the first of them."
-  [delta base me clock]
-  (let [entries (apply dissoc delta header)
-        new?    (fn [path]
-                  (let [old (set (some-> (get-in base path) entry/stamps))]
-                    #(and (= me (:device %)) (not (contains? old %)))))
-        fresh   (for [[path e] (tree/entries entries)
-                      s        (filter (new? path) (entry/stamps e))]
-                  (inst-ms (:updated-at s)))]
-    (if (and clock (seq fresh) (<= (apply min fresh) (inst-ms clock)))
-      (let [ms (- (inc (inst-ms clock)) (apply min fresh))]
-        (into (assoc (select-keys delta [:device])
-                     :clock (later-inst (:clock delta)
-                                        (entry/->inst (+ (apply max fresh) ms))))
-              (tree/update-entries entries
-                                   (fn [path e] (entry/shifted e (new? path) ms)))))
-      delta)))
-
-;; The registry counts a replica as having merged what its device holds, so
-;; a replica that merged its whole state into the store it shares would
-;; bring back what another replica compacted since. It merges only what it
-;; changed instead, as a delta-state (Almeida, Shoker and Baquero 2018), and
-;; moves its writes after the store's clock when that has passed them, as a
-;; hybrid logical clock does on receipt (Kulkarni et al. 2014). Nothing else
-;; has seen those writes, and a write stamped before a removal that it
-;; missed would bring the entry back once the tombstone is gone.
-(defn rebase
-  "The state `onto` with what `state` changed since `base` merged in, as
-  the replica of `state`, or `state` itself when `onto` is `base`.
-
-  A replica catches up with the store that it shares with the other
-  replicas of its device this way, rather than with merge: `base` is the
-  state that it last read from the store or wrote there, and `onto` the
-  state that the store holds now. When the clock of `onto` has passed a
-  write of the replica since `base`, all of them move later, in order,
-  until they come after it, as if made when they reach the store. So give
-  it only a `state` whose writes since `base` nothing else has seen."
-  [schema state base onto]
-  (if (= base onto)
-    state
-    (merge schema
-           (-> (with-replica onto nil)
-               (assoc :device (:device state))
-               (cond-> (:replica state) (assoc :replica (:replica state))))
-           (published (changes-since state base) base (author state)
-                      (:clock onto)))))
+    (into (select-keys state header) (tree/changed-part entries previous))))
 
 (defn identify
   "Describe this device in the registry of `state` at `at`, with a
