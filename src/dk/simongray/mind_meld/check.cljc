@@ -1,8 +1,7 @@
 (ns ^:no-doc dk.simongray.mind-meld.check
   "Checks of a state from another device, and of a schema: each describes
   the first value that breaks its rule, or gives nil."
-  (:require [dk.simongray.mind-meld.entry :as entry]
-            [dk.simongray.mind-meld.registry :as registry]))
+  (:require [dk.simongray.mind-meld.entry :as entry]))
 
 (defn clock-problem
   "A description of the clock of `state` when it isn't an instant, or nil."
@@ -10,16 +9,6 @@
   (when-some [clock (:clock state)]
     (when-not (inst? clock)
       (str "the clock is " (pr-str clock) ", not an instant"))))
-
-(defn replica-problem
-  "A description of the replica of `state` when it isn't a replica of the
-  state's device, or nil."
-  [state]
-  (when-some [replica (:replica state)]
-    (when-not (and (string? replica)
-                   (= (str (:device state)) (registry/replica-device replica)))
-      (str "the replica " (pr-str replica) " is not one of the device "
-           (pr-str (:device state))))))
 
 (defn- entry-problem
   "A description of the first value in `v` at `path` that isn't a map, of
